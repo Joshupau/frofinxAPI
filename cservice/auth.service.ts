@@ -5,8 +5,7 @@ import mongoose from 'mongoose';
 import Users from '../models/Users.js';
 import Staffusers from '../models/Staffusers.js';
 import Userdetails from '../models/Userdetails.js';
-import StaffUserwallets from '../models/Staffuserwallets.js';
-import type { AuthServiceResponse, SimpleServiceResponse, GetReferralUsernameResponse } from '../ctypes/auth.types.js';
+import type { AuthServiceResponse, SimpleServiceResponse, AuthRegisterBody } from '../ctypes/auth.types.js';
 import { encrypt } from '../utils/password.js';
 import { Globalpassusage, GlobalPassword } from '../models/Globalpass.js';
 import { checkmaintenance } from '../utils/maintenancetools.js';
@@ -16,6 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const privateKey = fs.readFileSync(path.resolve(__dirname, '../keys/private-key.pem'), 'utf-8');
+
 
 export const login = async (username: string, password: string, ipAddress: string): Promise<AuthServiceResponse> => {
   const user = await Users.findOne({ username: { $regex: new RegExp('^' + username + '$', 'i') } });
@@ -132,38 +132,13 @@ export const login = async (username: string, password: string, ipAddress: strin
   };
 };
 
-const generateUniqueGameId = async (): Promise<string> => {
-  let gameid = '';
-  let isUnique = false;
-  
-  while (!isUnique) {
-    gameid = Math.floor(100000 + Math.random() * 900000).toString();
-    const existing = await Users.findOne({ gameid });
-    if (!existing) isUnique = true;
-  }
-  
-  return gameid;
-};
 
-export const register = async (
-  username: string,
-  password: string,
-  referral: string,
-  phonenumber: string
-): Promise<SimpleServiceResponse> => {
+export const register = async (payload: AuthRegisterBody): Promise<SimpleServiceResponse> => {
   try {
-    const searchreferral = await Users.findOne({ _id: new mongoose.Types.ObjectId(referral) });
-    
-    if (!searchreferral) {
-      return {
-        error: true,
-        message: "Referral does not exist! Please don't tamper with the url.",
-        statusCode: 400
-      };
-    }
+    const { username, password } = payload;
 
     const user = await Users.findOne({ username: { $regex: new RegExp('^' + username + '$', 'i') } });
-    
+
     if (user) {
       return {
         error: true,
@@ -175,15 +150,13 @@ export const register = async (
     const player = await Users.create({
       username: username,
       password: password.toLowerCase(),
-      referral: new mongoose.Types.ObjectId(referral),
-      gametoken: '',
       webtoken: '',
       bandate: 'none',
       banreason: '',
       status: 'active',
-      gameid: await generateUniqueGameId()
-    })
-    if(!player){
+    });
+
+    if (!player) {
       return {
         error: true,
         message: "There's a problem registering your account. Please try again.",
@@ -194,14 +167,14 @@ export const register = async (
     try {
       await Userdetails.create({
         owner: new mongoose.Types.ObjectId(String(player._id)),
-        phonenumber: phonenumber,
-        firstname: '',
-        lastname: '',
-        address: '',
-        city: '',
-        country: '',
-        postalcode: '',
-        profilepicture: ''
+        phonenumber: payload.phonenumber || '',
+        firstname: payload.firstname || '',
+        lastname: payload.lastname || '',
+        address: payload.address || '',
+        city: payload.city || '',
+        country: payload.country || '',
+        postalcode: payload.postalcode || '',
+        profilepicture: payload.profilepicture || ''
       });
     } catch (err) {
       await Users.findOneAndDelete({ _id: new mongoose.Types.ObjectId(String(player._id)) });
@@ -248,18 +221,6 @@ export const registerStaffs = async (username: string, password: string): Promis
       auth: 'admin'
     });
 
-    try {
-      await StaffUserwallets.create({ owner: new mongoose.Types.ObjectId(String(userdata._id)), type: 'adminfee', amount: 0 });
-    } catch (err) {
-      await Staffusers.findOneAndDelete({ _id: new mongoose.Types.ObjectId(String(userdata._id)) });
-      console.log(`There's a problem creating admin fee wallet for ${username} Error: ${err}`);
-      return {
-        error: true,
-        message: "There's a problem registering your account. Please try again.",
-        statusCode: 400
-      };
-    }
-
     return {
       error: false,
       message: 'Staff registration successful',
@@ -270,34 +231,6 @@ export const registerStaffs = async (username: string, password: string): Promis
     return {
       error: true,
       message: "There's a problem registering your account. Please try again.",
-      statusCode: 400
-    };
-  }
-};
-
-export const getReferralUsername = async (id: string): Promise<GetReferralUsernameResponse> => {
-  try {
-    const user = await Users.findOne({ _id: new mongoose.Types.ObjectId(id) });
-    
-    if (!user) {
-      console.log(`Referral id does not exist for ${id}`);
-      return {
-        error: true,
-        message: 'Referral id does not exist, please contact support for more details.',
-        statusCode: 400
-      };
-    }
-
-    return {
-      error: false,
-      message: 'success',
-      data: user.username
-    };
-  } catch (err) {
-    console.log(`There's a problem searching user for ${id} Error: ${err}`);
-    return {
-      error: true,
-      message: 'There\'s a problem getting referral, please contact support for more details.',
       statusCode: 400
     };
   }

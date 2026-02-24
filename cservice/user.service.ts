@@ -17,9 +17,6 @@ export const getUserDetails = async (id: string, username: string): Promise<User
             };
         }
 
-        const userData = await Users.findOne({ _id: new mongoose.Types.ObjectId(id) })
-            .populate('referral', 'username');
-
         const data = {
             username: username,
             phonenumber: details.phonenumber,
@@ -28,12 +25,10 @@ export const getUserDetails = async (id: string, username: string): Promise<User
             address: details.address,
             city: details.city,
             country: details.country,
-            referral: userData?.referral ? (userData.referral as any).username : null,
             postalcode: details.postalcode,
             paymentmethod: details.paymentmethod,
             accountnumber: details.accountnumber,
             profilepicture: details.profilepicture,
-            gameid: (details.owner as any).gameid
         };
 
         return {
@@ -66,8 +61,6 @@ export const getUserDetailsSuperadmin = async (userid: string): Promise<UserServ
         const data = {
             username: details.username,
             status: details.status,
-            referral: details.referral ? (details.referral as any).username : "No Referral",
-            referralid: details.referral ? (details.referral as any)._id : '',
         };
 
         return {
@@ -389,53 +382,6 @@ export const multipleBanUsers = async (userlist: string[], status: string): Prom
         return {
             error: true,
             message: "There's a problem updating users status.",
-            statusCode: 400
-        };
-    }
-};
-
-export const getReferralLink = async (id: string): Promise<UserServiceResponse> => {
-    try {
-        const user = await Users.findOne({ _id: new mongoose.Types.ObjectId(id) });
-        
-        if (!user) {
-            return {
-                error: true,
-                message: "User not found.",
-                statusCode: 404
-            };
-        }
-        
-        // Generate referral link using user's ID or username
-        const referralLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/register?ref=${user.username}`;
-        
-        return {
-            error: false,
-            data: { referralLink }
-        };
-    } catch (err) {
-        console.log(`There's a problem getting referral link. Error: ${err}`);
-        return {
-            error: true,
-            message: "There's a problem getting your referral link.",
-            statusCode: 400
-        };
-    }
-};
-
-export const getPlayerCount = async (): Promise<UserServiceResponse> => {
-    try {
-        const count = await Users.countDocuments({});
-        
-        return {
-            error: false,
-            data: { playerCount: count }
-        };
-    } catch (err) {
-        console.log(`There's a problem getting player count. Error: ${err}`);
-        return {
-            error: true,
-            message: "There's a problem getting player count.",
             statusCode: 400
         };
     }

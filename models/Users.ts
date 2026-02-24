@@ -7,8 +7,7 @@ export interface IUser extends Document {
   password: string;
   status: string;
   webtoken?: string;
-  referral?: mongoose.Types.ObjectId;
-  gametoken?: string;
+  gameid?: string;
   bandate?: string;
   banreason?: string;
   matchPassword(_candidate: string): Promise<boolean>;
@@ -20,8 +19,6 @@ const UserSchema = new Schema<IUser>(
     password: { type: String, required: true },
     status: { type: String, required: true, default: 'active', index: true },
     webtoken: { type: String, index: true },
-    referral: { type: mongoose.Schema.Types.ObjectId, ref: 'Users', index: true },
-    gametoken: { type: String },
     bandate: { type: String },
     banreason: { type: String }
   },
@@ -41,9 +38,8 @@ UserSchema.pre<IUser>('save', async function (next) {
   }
 });
 
-UserSchema.methods.matchPassword = async function (_candidate: string): Promise<boolean> {
-  return bcrypt.compare(_candidate, this.password);
-};
+
 
 const Users: Model<IUser> = mongoose.models.Users || mongoose.model<IUser>('Users', UserSchema);
 export default Users;
+

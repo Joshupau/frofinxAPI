@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Request, Response, NextFunction } from 'express';
-import { optionalObjectId } from './validation.utils.js';
+import { optionalObjectId, optionalString } from './validation.utils.js';
 
 // Zod schemas
 export const loginSchema = z.object({
@@ -18,11 +18,20 @@ export const registerSchema = z.object({
     .min(5, 'Minimum of 5 characters for password! Please try again.')
     .max(20, 'Maximum of 20 characters for password! Please try again.')
     .regex(/^[a-z0-9]+$/, "Please use lowercase letters and numbers only for username."),
-  referral: z.string().min(1, 'Referral is required.'),
+  // optional user details
   phonenumber: z.string()
     .length(11, 'Please enter your right phone number! 11 numbers are needed to be entered.')
     .regex(/^[0-9]+$/, 'Please input a valid phone number and try again.')
+    .optional(),
+  firstname: optionalString,
+  lastname: optionalString,
+  address: optionalString,
+  city: optionalString,
+  country: optionalString,
+  postalcode: optionalString,
+  profilepicture: optionalString
 });
+
 
 export const registerStaffSchema = z.object({
   username: z.string()
@@ -35,15 +44,13 @@ export const registerStaffSchema = z.object({
     .regex(/^[a-zA-Z0-9[\]!@#*]+$/, 'Only []!@#* are supported special characters for password! Please try again.')
 });
 
-export const referralQuerySchema = z.object({
-  id: optionalObjectId.or(z.string().min(1, "No referral found! Please don't tamper with the URL."))
-});
+// Referral schema removed - referrals no longer used
 
 // Export inferred types
 export type LoginBody = z.infer<typeof loginSchema>;
 export type RegisterBody = z.infer<typeof registerSchema>;
 export type RegisterStaffBody = z.infer<typeof registerStaffSchema>;
-export type ReferralQuery = z.infer<typeof referralQuerySchema>;
+// ReferralQuery type removed
 
 // Validators
 export const login = async (req: Request, res: Response, next: NextFunction) => {
@@ -76,22 +83,4 @@ export const registerStaffs = async (req: Request, res: Response, next: NextFunc
   next();
 };
 
-export const getReferralUsername = async (req: Request, res: Response, next: NextFunction) => {
-  const parsed = referralQuerySchema.safeParse(req.query);
-  if (!parsed.success) {
-    const firstError = parsed.error.issues[0];
-    return res.status(400).json({ message: 'failed', data: firstError.message });
-  }
-  req.query = parsed.data as any;
-  next();
-};
-
-export const referralQuery = async (req: Request, res: Response, next: NextFunction) => {
-  const parsed = referralQuerySchema.safeParse(req.query);
-  if (!parsed.success) {
-    const firstError = parsed.error.issues[0];
-    return res.status(401).json({ message: 'failed', data: firstError.message });
-  }
-  req.query = parsed.data as any;
-  next();
-};
+// Referral validators removed

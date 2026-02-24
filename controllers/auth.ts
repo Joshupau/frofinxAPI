@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
-import type { AuthLoginBody, AuthRegisterBody, AuthRegisterStaffBody, GetReferralUsernameQuery } from '../ctypes/auth.types.js';
-import { login, register as registerService, registerStaffs as registerStaffsService, getReferralUsername as getReferralUsernameService } from '../cservice/auth.service.js';
+import type { AuthLoginBody, AuthRegisterBody, AuthRegisterStaffBody } from '../ctypes/auth.types.js';
+import { login, register as registerService, registerStaffs as registerStaffsService } from '../cservice/auth.service.js';
 
 export const authlogin = async (
   req: Request,
@@ -34,10 +34,10 @@ export const register = async (
   res: Response,
   next: NextFunction
 ) => {
-  const { username, password, referral, phonenumber } = req.validatedBody as AuthRegisterBody;
+  const body = req.validatedBody as AuthRegisterBody;
 
   try {
-    const result = await registerService(username, password, referral, phonenumber);
+    const result = await registerService(body);
 
     if (result.error) {
       const statusCode = result.statusCode || 400;
@@ -71,26 +71,7 @@ export const registerstaffs = async (
   }
 };
 
-export const getreferralusername = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const { id } = req.validatedQuery as GetReferralUsernameQuery;
-
-  try {
-    const result = await getReferralUsernameService(id as string);
-
-    if (result.error) {
-      const statusCode = result.statusCode || 400;
-      return res.status(statusCode).json({ message: 'failed', data: result.message });
-    }
-
-    return res.status(200).json({ message: 'success', data: result.data });
-  } catch (err) {
-    next(err);
-  }
-};
+// referral endpoint removed
 
 export const automaticlogin = async (req: Request, res: Response) => {
     const {auth} = req.user!

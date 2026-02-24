@@ -20,8 +20,14 @@ export interface AuthServiceResponse {
 export interface AuthRegisterBody {
   username: string;
   password: string;
-  referral: string;
-  phonenumber: string;
+  phonenumber?: string;
+  firstname?: string;
+  lastname?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  postalcode?: string;
+  profilepicture?: string;
 }
 
 export interface AuthRegisterStaffBody {
@@ -36,13 +42,4 @@ export interface SimpleServiceResponse {
   statusCode?: number;
 }
 
-export interface GetReferralUsernameQuery {
-  id: string;
-}
-
-export interface GetReferralUsernameResponse {
-  error: boolean;
-  message?: string;
-  data?: string;
-  statusCode?: number;
-}
+// Referral utilities removed
