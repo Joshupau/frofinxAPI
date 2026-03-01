@@ -1,0 +1,140 @@
+[
+  {
+    "name": "Salary",
+    "type": "income",
+    "icon": "💰",
+    "color": "#4CAF50"
+  },
+  {
+    "name": "Freelance",
+    "type": "income",
+    "icon": "💼",
+    "color": "#2196F3"
+  },
+  {
+    "name": "Business",
+    "type": "income",
+    "icon": "🏢",
+    "color": "#FF9800"
+  },
+  {
+    "name": "Investment",
+    "type": "income",
+    "icon": "📈",
+    "color": "#9C27B0"
+  },
+  {
+    "name": "Remittance",
+    "type": "income",
+    "icon": "🌐",
+    "color": "#00BCD4"
+  },
+  {
+    "name": "Gift",
+    "type": "income",
+    "icon": "🎁",
+    "color": "#E91E63"
+  },
+  {
+    "name": "Other Income",
+    "type": "income",
+    "icon": "➕",
+    "color": "#607D8B"
+  },
+  {
+    "name": "Food & Dining",
+    "type": "expense",
+    "icon": "🍽️",
+    "color": "#FF5722"
+  },
+  {
+    "name": "Groceries",
+    "type": "expense",
+    "icon": "🛒",
+    "color": "#8BC34A"
+  },
+  {
+    "name": "Transportation",
+    "type": "expense",
+    "icon": "🚗",
+    "color": "#FFC107"
+  },
+  {
+    "name": "Bills & Utilities",
+    "type": "expense",
+    "icon": "⚡",
+    "color": "#FF9800"
+  },
+  {
+    "name": "Rent",
+    "type": "expense",
+    "icon": "🏠",
+    "color": "#795548"
+  },
+  {
+    "name": "Healthcare",
+    "type": "expense",
+    "icon": "🏥",
+    "color": "#F44336"
+  },
+  {
+    "name": "Entertainment",
+    "type": "expense",
+    "icon": "🎬",
+    "color": "#9C27B0"
+  },
+  {
+    "name": "Shopping",
+    "type": "expense",
+    "icon": "🛍️",
+    "color": "#E91E63"
+  },
+  {
+    "name": "Education",
+    "type": "expense",
+    "icon": "📚",
+    "color": "#3F51B5"
+  },
+  {
+    "name": "Insurance",
+    "type": "expense",
+    "icon": "🛡️",
+    "color": "#00BCD4"
+  },
+  {
+    "name": "Clothing",
+    "type": "expense",
+    "icon": "👔",
+    "color": "#673AB7"
+  },
+  {
+    "name": "Personal Care",
+    "type": "expense",
+    "icon": "💅",
+    "color": "#FF4081"
+  },
+  {
+    "name": "Travel",
+    "type": "expense",
+    "icon": "✈️",
+    "color": "#2196F3"
+  },
+  {
+    "name": "Subscription",
+    "type": "expense",
+    "icon": "📱",
+    "color": "#00BCD4"
+  },
+  {
+    "name": "Donation",
+    "type": "expense",
+    "icon": "❤️",
+    "color": "#E91E63"
+  },
+  {
+    "name": "Other Expense",
+    "type": "expense",
+    "icon": "➖",
+    "color": "#607D8B"
+  }
+]

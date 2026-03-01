@@ -1,11 +1,16 @@
 import mongoose from "mongoose"
 import Users from "../models/Users.js"
 import Userdetails from "../models/Userdetails.js";
-import Staffusers from "../models/Staffusers.js";
-import StaffUserwallets from "../models/Staffuserwallets.js";
 import { GlobalPassword } from "../models/Globalpass.js";
 import Maintenance from "../models/Maintenance.js";
+import Categories from "../models/Categories.js";
 import { encrypt } from "../utils/password.js";
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export const initialize = async () => {
 
@@ -87,6 +92,37 @@ export const initialize = async () => {
             })
         })
         console.log("Maintenance initalized")
+    }
+
+    // Initialize default categories
+    const categories: any[] = await Categories.find({ isDefault: true })
+    .catch((err: unknown) => {
+        console.log(`There's a problem getting default categories for init. Error ${err}`)
+        return []
+    })
+
+    if (categories.length <= 0) {
+        try {
+            const categoriesFilePath = path.join(__dirname, 'data', 'categories.json');
+            const categoriesData = fs.readFileSync(categoriesFilePath, 'utf-8');
+            const defaultCategories = JSON.parse(categoriesData);
+
+            for (const category of defaultCategories) {
+                await Categories.create({
+                    owner: null, // null for default/global categories
+                    name: category.name,
+                    type: category.type,
+                    icon: category.icon,
+                    color: category.color,
+                    isDefault: true,
+                    status: 'active'
+                });
+            }
+
+            console.log(`Default categories initialized (${defaultCategories.length} categories)`);
+        } catch (err) {
+            console.log(`There's a problem creating default categories for init. Error ${err}`);
+        }
     }
 
     console.log("SERVER DATA INITIALIZED")
