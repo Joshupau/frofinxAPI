@@ -25,11 +25,11 @@ const routers: Routers = (_app: AppInterface) => {
   _app.use('/staffuser', staffUserRouter);
   
   // Finance tracker routes
-  _app.use('/categories', categoriesRouter);
-  _app.use('/wallets', walletsRouter);
-  _app.use('/transactions', transactionsRouter);
-  _app.use('/bills', billsRouter);
-  _app.use('/budgets', budgetsRouter);
+  _app.use('/category', categoriesRouter);
+  _app.use('/wallet', walletsRouter);
+  _app.use('/transaction', transactionsRouter);
+  _app.use('/bill', billsRouter);
+  _app.use('/budget', budgetsRouter);
 
 };
 

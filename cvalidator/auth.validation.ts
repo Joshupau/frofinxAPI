@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Request, Response, NextFunction } from 'express';
-import { optionalObjectId, optionalString } from './validation.utils.js';
+import { optionalString } from './validation.utils.js';
 
 // Zod schemas
 export const loginSchema = z.object({
@@ -8,6 +8,11 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Please input password.'),
   ipAddress: z.string().min(1, 'Please provide a valid IP address.')
 });
+
+export const passportLoginSchema = z.object({
+  username: z.string().min(1, 'Please input username.'),
+  password: z.string().min(1, 'Please input password.'),
+})
 
 export const registerSchema = z.object({
   username: z.string()
@@ -23,6 +28,7 @@ export const registerSchema = z.object({
     .length(11, 'Please enter your right phone number! 11 numbers are needed to be entered.')
     .regex(/^[0-9]+$/, 'Please input a valid phone number and try again.')
     .optional(),
+  email: optionalString,
   firstname: optionalString,
   lastname: optionalString,
   address: optionalString,

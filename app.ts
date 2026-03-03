@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import type { RequestHandler } from "express";
 import http from "http";
 import cors from "cors";
+import passport from "./config/passport.js";
 import globalErrorHandler from "./middleware/errorHandler.js";
 import dotenv from "dotenv";
 import routers from "./routes/index.js";
@@ -43,6 +44,7 @@ mongoose
 app.use(bodyParser.json({ limit: "50mb" }))
 app.use(bodyParser.urlencoded({ limit: "50mb", extended: false, parameterLimit: 50000 }))
 app.use(cookieParser() as RequestHandler);
+app.use(passport.initialize());
 
 routers(app);
 

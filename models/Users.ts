@@ -4,7 +4,12 @@ import bcrypt from 'bcrypt';
 export interface IUser extends Document {
   _id: mongoose.Types.ObjectId;
   username: string;
-  password: string;
+  password?: string;
+  email?: string;
+  name?: string;
+  provider?: 'local' | 'google' | 'facebook';
+  googleId?: string;
+  facebookId?: string;
   status: string;
   webtoken?: string;
   gameid?: string;
@@ -16,7 +21,12 @@ export interface IUser extends Document {
 const UserSchema = new Schema<IUser>(
    {
     username: { type: String, required: true, index: true },
-    password: { type: String, required: true },
+    password: { type: String },
+    email: { type: String, index: true },
+    name: { type: String },
+    provider: { type: String, enum: ['local', 'google', 'facebook'], default: 'local' },
+    googleId: { type: String, unique: true, sparse: true, index: true },
+    facebookId: { type: String, unique: true, sparse: true, index: true },
     status: { type: String, required: true, default: 'active', index: true },
     webtoken: { type: String, index: true },
     bandate: { type: String },
@@ -29,7 +39,7 @@ const UserSchema = new Schema<IUser>(
 );
 
 UserSchema.pre<IUser>('save', async function (next) {
-  if (!this.isModified('password')) return next();
+  if (!this.password || !this.isModified('password')) return next();
   try {
     this.password = await bcrypt.hash(this.password, 10);
     return next();
@@ -38,7 +48,10 @@ UserSchema.pre<IUser>('save', async function (next) {
   }
 });
 
-
+UserSchema.methods.matchPassword = async function (candidate: string): Promise<boolean> {
+  if (!this.password) return false;
+  return bcrypt.compare(candidate, this.password);
+};
 
 const Users: Model<IUser> = mongoose.models.Users || mongoose.model<IUser>('Users', UserSchema);
 export default Users;

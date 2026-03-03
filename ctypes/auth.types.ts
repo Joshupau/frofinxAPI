@@ -13,6 +13,8 @@ export interface AuthServiceResponse {
     fullname?: string;
     username?: string;
     userid?: string;
+    banreason?: string;
+    bandate?: string;
   };
   statusCode?: number;
 }
@@ -39,6 +41,26 @@ export interface SimpleServiceResponse {
   error: boolean;
   message?: string;
   data?: any;
+  statusCode?: number;
+}
+
+export interface OAuthProfile {
+  id: string;
+  providerId: string;
+  email?: string;
+  name?: string;
+  provider: 'google' | 'facebook';
+}
+
+export interface OAuthServiceResponse {
+  error: boolean;
+  message?: string;
+  data?: {
+    token: string;
+    auth: string;
+    username?: string;
+    userid?: string;
+  };
   statusCode?: number;
 }
 

@@ -174,7 +174,7 @@ export const register = async (payload: AuthRegisterBody): Promise<SimpleService
         city: payload.city || '',
         country: payload.country || '',
         postalcode: payload.postalcode || '',
-        profilepicture: payload.profilepicture || ''
+        profilepicture: ''
       });
     } catch (err) {
       await Users.findOneAndDelete({ _id: new mongoose.Types.ObjectId(String(player._id)) });
@@ -232,6 +232,152 @@ export const registerStaffs = async (username: string, password: string): Promis
       error: true,
       message: "There's a problem registering your account. Please try again.",
       statusCode: 400
+    };
+  }
+};
+
+export const socialLogin = async (
+  provider: 'google' | 'facebook',
+  providerId: string,
+  email: string,
+  name?: string
+): Promise<AuthServiceResponse> => {
+  try {
+    // Validate inputs
+    if (!providerId || !email) {
+      return {
+        error: true,
+        message: 'Invalid OAuth data: Missing provider ID or email',
+        statusCode: 400,
+        data: { token: '', auth: '' }
+      };
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return {
+        error: true,
+        message: 'Invalid email format from OAuth provider',
+        statusCode: 400,
+        data: { token: '', auth: '' }
+      };
+    }
+
+    const providerField = provider === 'google' ? 'googleId' : 'facebookId';
+
+    // Check if user exists with this provider ID
+    let user = await Users.findOne({ [providerField]: providerId });
+
+    if (!user) {
+      // Check if email already exists
+      user = await Users.findOne({ email });
+
+      if (user) {
+        // Email exists - check if it's a local account or different provider
+        if (user.provider !== 'local' && user.provider !== provider) {
+          return {
+            error: true,
+            message: `Email already linked to ${user.provider} account`,
+            statusCode: 409,
+            data: { token: '', auth: '' }
+          };
+        }
+
+        // Link OAuth provider to existing account
+        user[providerField] = providerId;
+        user.provider = provider;
+        if (!user.name && name) user.name = name;
+        await user.save();
+      } else {
+        // Create new user
+        const username = email.split('@')[0] + '_' + Date.now().toString(36);
+
+        user = await Users.create({
+          [providerField]: providerId,
+          username,
+          email,
+          name,
+          provider,
+          status: 'active'
+        });
+
+        // Create user details
+        await Userdetails.create({
+          owner: user._id,
+          firstname: name?.split(' ')[0] || '',
+          lastname: name?.split(' ').slice(1).join(' ') || ''
+        });
+      }
+    }
+
+    // Check user status
+    if (user.status === 'banned') {
+      return {
+        error: true,
+        message: `Your account had been banned! Please contact support for more details.`,
+        statusCode: 403,
+        data: {
+          token: '',
+          auth: '',
+          banreason: user.banreason,
+          bandate: user.bandate
+        }
+      };
+    }
+
+    if (user.status !== 'active') {
+      return {
+        error: true,
+        message: `Your account had been ${user.status}! Please contact support for more details.`,
+        statusCode: 403,
+        data: { token: '', auth: '' }
+      };
+    }
+
+    // Check maintenance (OAuth users bypass with implicit global pass behavior)
+    const fullMaintenance = await checkmaintenance('full');
+    if (fullMaintenance === 'maintenance') {
+      // Allow OAuth login during maintenance for testing
+      // You can change this logic if you want to block OAuth too
+    }
+
+    // Generate JWT token
+    const token = await encrypt(privateKey);
+    await Users.findByIdAndUpdate({ _id: user._id }, { $set: { webtoken: token } }, { new: true });
+
+    const userDetails = await Userdetails.findOne({ owner: user._id }) || { firstname: '', lastname: '' };
+    const fullname = `${userDetails.firstname} ${userDetails.lastname}`.trim();
+
+    const payload = {
+      id: user._id,
+      username: user.username,
+      status: user.status,
+      token: token,
+      auth: 'player',
+      provider: provider
+    };
+
+    const jwtoken = await jsonwebtokenPromisified.sign(payload, privateKey, { algorithm: 'RS256' });
+
+    return {
+      error: false,
+      data: {
+        token: jwtoken,
+        fullname: fullname || user.name || user.username,
+        username: user.username,
+        auth: 'player',
+        userid: user._id.toString()
+      },
+      message: 'success'
+    };
+  } catch (error) {
+    console.error('Social login error:', error);
+    return {
+      error: true,
+      message: 'Authentication failed. Please try again.',
+      statusCode: 500,
+      data: { token: '', auth: '' }
     };
   }
 };
