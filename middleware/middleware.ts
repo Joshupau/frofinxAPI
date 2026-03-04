@@ -4,208 +4,166 @@ import fs from 'fs';
 import path from "path";
 import { fileURLToPath } from 'url';
 import Staffusers from '../models/Staffusers.js';
-import type { IStaffuser } from '../models/Staffusers.js';
-import { toAppError } from '../utils/error.js';
 import Users from '../models/Users.js';
-import type { IUser } from '../models/Users.js';
-import type { Document } from 'mongoose';
 import jsonwebtokenPromisified from 'jsonwebtoken-promisified';
-import { checkmaintenance } from '../utils/maintenancetools.js';
+import passport from '../config/passport.js';
+import { encrypt } from '../utils/password.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const publicKey = fs.readFileSync(path.resolve(__dirname, "../keys/public-key.pem"), 'utf-8');
 
 
-const verifyJWT = async (token: string) => {
-    try {
-        const decoded = await jsonwebtokenPromisified.verify(token, publicKey, { algorithms: ['RS256'] });
-        return decoded;
-    } catch (error) {
-        const appError = toAppError(error);
-        console.error('Invalid token:', appError.message);
-        throw new Error('Invalid token');
-    }
+// Passport Local Strategy Middleware
+export const localAuthenticate = (req: Request, res: Response, next: NextFunction) => {
+    passport.authenticate('local', (err: any, user: any, info: any) => {
+    
+        if (err) {
+            console.error('Passport auth error:', err);
+            return next(err);
+        }
+
+        if (!user) {
+            console.error('Authentication failed:', info?.message);
+            return res.status(401).json({ message: 'failed', data: info?.message || 'Authentication failed' });
+        }
+
+        req.logIn(user, async (loginErr) => {
+            if (loginErr) {
+                console.error('Login error:', loginErr);
+                return next(loginErr);
+            }
+
+            try {
+                const privateKey = fs.readFileSync(path.resolve(__dirname, '../keys/private-key.pem'), 'utf-8');
+                const token = await encrypt(privateKey);
+                
+                // Update user webtoken
+                if (user.userType === 'Staffusers' || user.auth) {
+                    await Staffusers.findByIdAndUpdate({ _id: user._id }, { $set: { webtoken: token } });
+                } else {
+                    await Users.findByIdAndUpdate({ _id: user._id }, { $set: { webtoken: token } });
+                }
+
+                // Create JWT token
+                const payload = {
+                    id: user._id,
+                    username: user.username,
+                    status: user.status,
+                    token: token,
+                    auth: user.auth || 'player'
+                };
+
+                const jwtoken = await jsonwebtokenPromisified.sign(payload, privateKey, { algorithm: 'RS256' });
+
+                // Set cookie with appropriate settings for environment
+                const isProduction = process.env.NODE_ENV === 'production';
+                res.cookie('sessionToken', jwtoken, { 
+                    secure: isProduction,          // HTTPS only in production
+                    sameSite: isProduction ? 'none' : 'lax',  // 'lax' for dev, 'none' for prod
+                    httpOnly: true,
+                    maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
+                    path: '/'
+                });
+                
+                console.log('✓ Local authentication successful - token set for user:', user.username);
+                return res.status(200).json({
+                    message: 'success',
+                    data: {
+                        token: jwtoken,
+                        username: user.username,
+                        auth: user.auth || 'player'
+                    }
+                });
+            } catch (error) {
+                console.error('Token generation error:', error);
+                return next(error);
+            }
+        });
+    })(req, res, next);
 };
 
-export const protectsuperadmin = async (req: Request, res: Response, next: NextFunction) => {
-    const token = req.headers.cookie?.split('; ').find(row => row.startsWith('sessionToken='))?.split('=')[1]
-
-    if (!token){
-        return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-    }
-
-    try{
-        const decodedToken = await verifyJWT(token);
-
-        if (decodedToken.auth != "superadmin" && decodedToken.auth != "admin"){
-            return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
+// Google OAuth Callback Handler
+export const googleAuthCallback = (req: Request, res: Response, next: NextFunction) => {
+    passport.authenticate('google', async (err: any, data: any) => {
+        if (err) {
+            console.error('Google auth error:', err);
+            return res.redirect(`/auth/failure?error=${encodeURIComponent(err.message)}`);
         }
 
-        const user = await Staffusers.findOne({username: decodedToken.username})
-        .then(data => data)
-
-        if (!user){
-            res.clearCookie('sessionToken', { path: '/' })
-            return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
+        if (!data) {
+            return res.redirect('/auth/failure?error=Google authentication failed');
         }
 
-        if (user.status != "active"){
-            res.clearCookie('sessionToken', { path: '/' })
-            return res.status(401).json({ message: 'failed', data: `Your account had been ${user.status}! Please contact support for more details.` });
+        try {
+            const jwtoken = data.token;
+            const isProduction = process.env.NODE_ENV === 'production';
+
+            res.cookie('sessionToken', jwtoken, { 
+                secure: isProduction,
+                sameSite: isProduction ? 'none' : 'lax',
+                httpOnly: true,
+                maxAge: 7 * 24 * 60 * 60 * 1000,
+                path: '/'
+            });
+            
+            console.log('✓ Google OAuth successful - redirecting with token');
+            return res.redirect(`/auth/success?token=${encodeURIComponent(jwtoken)}&auth=player&username=${encodeURIComponent(data.username)}`);
+        } catch (error) {
+            console.error('Google callback error:', error);
+            return res.redirect('/auth/failure?error=Server error during authentication');
+        }
+    })(req, res, next);
+};
+
+// Facebook OAuth Callback Handler
+export const facebookAuthCallback = (req: Request, res: Response, next: NextFunction) => {
+    passport.authenticate('facebook', async (err: any, data: any) => {
+        if (err) {
+            console.error('Facebook auth error:', err);
+            return res.redirect(`/auth/failure?error=${encodeURIComponent(err.message)}`);
         }
 
-        // if (decodedToken.token != user.webtoken){
-        //     res.clearCookie('sessionToken', { path: '/' })
-        //     return res.status(401).json({ message: 'duallogin', data: `Your account had been opened on another device! You will now be logged out.` });
-        // }
-
-        req.user = decodedToken;
-        next();
-    }
-    catch(ex){
-        console.log('ex_SA:', ex);
-        return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-    }
-}
-
-export const protectadmin = async (req: Request, res: Response, next: NextFunction) => {
-    const token = req.headers.cookie?.split('; ').find(row => row.startsWith('sessionToken='))?.split('=')[1]
-
-    if (!token){
-        return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-    }
-
-    try{
-        const decodedToken = await verifyJWT(token);
-
-        if (decodedToken.auth != "admin" && decodedToken.auth != "superadmin"){
-            return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
+        if (!data) {
+            return res.redirect('/auth/failure?error=Facebook authentication failed');
         }
 
-        const user = await Staffusers.findOne({username: decodedToken.username})
-        .then(data => data)
+        try {
+            const jwtoken = data.token;
+            const isProduction = process.env.NODE_ENV === 'production';
 
-        if (!user){
-            res.clearCookie('sessionToken', { path: '/' })
-            return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
+            res.cookie('sessionToken', jwtoken, { 
+                secure: isProduction,
+                sameSite: isProduction ? 'none' : 'lax',
+                httpOnly: true,
+                maxAge: 7 * 24 * 60 * 60 * 1000,
+                path: '/'
+            });
+            
+            console.log('✓ Facebook OAuth successful - redirecting with token');
+            return res.redirect(`/auth/success?token=${encodeURIComponent(jwtoken)}&auth=player&username=${encodeURIComponent(data.username)}`);
+        } catch (error) {
+            console.error('Facebook callback error:', error);
+            return res.redirect('/auth/failure?error=Server error during authentication');
         }
+    })(req, res, next);
+};
 
-        if (user.status != "active"){
-            res.clearCookie('sessionToken', { path: '/' })
-            return res.status(401).json({ message: 'failed', data: `Your account had been ${user.status}! Please contact support for more details.` });
+// Passport Serialization (for session support)
+passport.serializeUser((user: any, done) => {
+    done(null, { id: user._id, type: user.auth ? 'staff' : 'player' });
+});
+
+passport.deserializeUser(async (obj: any, done) => {
+    try {
+        let user;
+        if (obj.type === 'staff') {
+            user = await Staffusers.findById(obj.id);
+        } else {
+            user = await Users.findById(obj.id);
         }
-
-        // if (decodedToken.token != user.webtoken){
-        //     res.clearCookie('sessionToken', { path: '/' })
-        //     return res.status(401).json({ message: 'duallogin', data: `Your account had been opened on another device! You will now be logged out.` });
-        // }
-
-        req.user = decodedToken;
-        next();
+        done(null, user);
+    } catch (error) {
+        done(error);
     }
-    catch(ex){
-        console.log('ex_SA:', ex);
-        return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-    }
-}
-
-
-export const protectusers = async (req: Request, res: Response, next: NextFunction) => {
-    const token = req.headers.cookie?.split('; ').find(row => row.startsWith('sessionToken='))?.split('=')[1]
-
-    if (!token){
-        return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-    }
-
-    try{
-        const decodedToken = await verifyJWT(token);
-
-        if (decodedToken.auth != "player"){
-            return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-        }
-
-        // Check for full maintenance mode, but skip if user logged in with global password
-        if (!decodedToken.globalpass) {
-            const fullMaintenance = await checkmaintenance('full');
-            if (fullMaintenance === 'maintenance') {
-                return res.status(503).json({ message: 'maintenance', data: 'The site is currently under maintenance. Please try again later.' });
-            }
-        }
-
-        const user = await Users.findOne({username: decodedToken.username})
-        .then(data => data)
-
-        if (!user){
-            res.clearCookie('sessionToken', { path: '/' })
-            return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-        }
-
-        if (user.status != "active"){
-            res.clearCookie('sessionToken', { path: '/' })
-            return res.status(401).json({ message: 'failed', data: `Your account had been ${user.status}! Please contact support for more details.` });
-        }
-
-        // if (decodedToken.token != user.webtoken){
-        //     res.clearCookie('sessionToken', { path: '/' })
-        //     return res.status(401).json({ message: 'duallogin', data: `Your account had been opened on another device! You will now be logged out.` });
-        // }
-
-        req.user = decodedToken;
-        next();
-    }
-    catch(ex){
-        console.log('ex_USER:', ex);
-        return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-    }
-}
-
-export const protectallusers = async (req: Request, res: Response, next: NextFunction) => {
-    const token = req.headers.cookie?.split('; ').find(row => row.startsWith('sessionToken='))?.split('=')[1]
-
-    if (!token){
-        return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-    }
-
-    try{
-        const decodedToken = await verifyJWT(token);
-
-        let user: (Document & IStaffuser) | (Document & IUser) | null = await Staffusers.findOne({username: decodedToken.username});
-
-        if (!user){
-            // Check for full maintenance mode for regular users only, but skip if global password was used
-            if (!decodedToken.globalpass) {
-                const fullMaintenance = await checkmaintenance('full');
-                if (fullMaintenance === 'maintenance') {
-                    return res.status(503).json({ message: 'maintenance', data: 'The site is currently under maintenance. Please try again later.' });
-                }
-            }
-
-            user = await Users.findOne({username: decodedToken.username});
-
-            if (!user){
-                res.clearCookie('sessionToken', { path: '/' })
-                return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-            }
-        }
-
-        if (user.status != "active"){
-            res.clearCookie('sessionToken', { path: '/' })
-            return res.status(401).json({ message: 'failed', data: `Your account had been ${user.status}! Please contact support for more details.` });
-        }
-
-        // if (decodedToken.token != user.webtoken){
-        //     res.clearCookie('sessionToken', { path: '/' })
-        //     return res.status(401).json({ message: 'duallogin', data: `Your account had been opened on another device! You will now be logged out.` });
-        // }
-
-        req.user = decodedToken;
-        next();
-    }
-    catch(ex){
-        console.log('ex_ALLUSER:', ex);
-        return res.status(401).json({ message: 'Unauthorized', data: "You are not authorized to view this page. Please login the right account to view the page." });
-    }
-}
-
+});

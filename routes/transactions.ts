@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { protectusers } from '../middleware/middleware.js';
 import { zodBody, zodQuery } from '../cvalidator/zod.middleware.js';
 import {
   createTransactionSchema,
@@ -14,11 +13,11 @@ import * as ctrl from '../controllers/transactions.js';
 const router = Router();
 
 router
-  .post('/create', protectusers, zodBody(createTransactionSchema), ctrl.create)
-  .get('/list', protectusers, zodQuery(listTransactionsQuerySchema), ctrl.list)
-  .post('/update', protectusers, zodBody(updateTransactionSchema), ctrl.update)
-  .post('/delete', protectusers, zodBody(deleteTransactionSchema), ctrl.deleteTransaction)
-  .get('/report/monthly', protectusers, zodQuery(monthlyReportQuerySchema), ctrl.getMonthlyReport)
-  .get('/report/category', protectusers, zodQuery(categoryBreakdownQuerySchema), ctrl.getCategoryBreakdown);
+  .post('/create', zodBody(createTransactionSchema), ctrl.create)
+  .get('/list', zodQuery(listTransactionsQuerySchema), ctrl.list)
+  .post('/update', zodBody(updateTransactionSchema), ctrl.update)
+  .post('/delete', zodBody(deleteTransactionSchema), ctrl.deleteTransaction)
+  .get('/report/monthly', zodQuery(monthlyReportQuerySchema), ctrl.getMonthlyReport)
+  .get('/report/category', zodQuery(categoryBreakdownQuerySchema), ctrl.getCategoryBreakdown);
 
 export default router;

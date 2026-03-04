@@ -5,13 +5,15 @@ import cookieParser from 'cookie-parser';
 import type { RequestHandler } from "express";
 import http from "http";
 import cors from "cors";
+import dotenv from "dotenv";
+
+// Load environment variables FIRST, before importing anything that uses them
+dotenv.config();
+
 import passport from "./config/passport.js";
 import globalErrorHandler from "./middleware/errorHandler.js";
-import dotenv from "dotenv";
 import routers from "./routes/index.js";
 import { initialize } from "./initialization/initialize.js";
-
-dotenv.config();
 
 const app = express();
 

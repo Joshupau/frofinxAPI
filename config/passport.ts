@@ -1,10 +1,15 @@
 import passport from 'passport';
+import { Strategy as JwtStrategy } from 'passport-jwt';
 import { Strategy as LocalStrategy } from 'passport-local';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
 import type { Profile } from 'passport';
 import Users from '../models/Users.js';
 import * as authService from '../cservice/auth.service.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 
 // Validate OAuth environment variables
 const validateOAuthConfig = () => {
@@ -21,6 +26,51 @@ const validateOAuthConfig = () => {
     
     return { googleEnabled, facebookEnabled, baseUrl };
 };
+
+
+const jwtSecret = process.env.JWT_SECRET_KEY;
+if (!jwtSecret) {
+    throw new Error('JWT_SECRET_KEY environment variable is required');
+}
+
+// Custom JWT extraction to check both Authorization header and cookies
+const jwtFromRequest = (req: any) => {
+    // Try Authorization header first (Bearer token)
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        return authHeader.slice(7);
+    }
+    
+    // Fallback to cookie
+    if (req.cookies?.sessionToken) {
+        return req.cookies.sessionToken;
+    }
+    
+    return null;
+};
+
+const jwtOptions = {
+  secretOrKey: jwtSecret,
+  jwtFromRequest: jwtFromRequest,
+};
+
+passport.use(
+    "jwt",
+    new JwtStrategy(jwtOptions, async (jwtPayload, done) => {
+        try {
+            // Token has _id not id
+            const userId = jwtPayload._id || jwtPayload.id;
+            const user = await Users.findById(userId);
+            if (user) {
+                return done(null, user);
+            } else {
+                return done(null, false);
+            }
+        } catch (error) {
+            return done(error, false);
+        }
+    })
+);
 
 const config = validateOAuthConfig();
 
@@ -168,5 +218,6 @@ if (config.facebookEnabled) {
 } else {
     console.log('⚠ Facebook OAuth disabled - missing credentials');
 }
+
 
 export default passport;

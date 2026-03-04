@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { authlogin, automaticlogin, logout, register, registerstaffs, oauthCallback, passportLogin } from '../controllers/auth.js';
-import { protectallusers, protectsuperadmin } from '../middleware/middleware.js';
 import { zodBody } from '../cvalidator/zod.middleware.js';
 import { loginSchema, passportLoginSchema, registerSchema, registerStaffSchema } from '../cvalidator/auth.validation.js';
 import passport from '../config/passport.js';
@@ -13,8 +12,8 @@ router
     .post("/login", zodBody(loginSchema), authlogin)
     .post("/passport-login", zodBody(passportLoginSchema), passportLogin)
     .post("/register", zodBody(registerSchema), register)
-    .get("/automaticlogin", protectallusers, automaticlogin)
-    .post("/registerstaffs", protectsuperadmin, zodBody(registerStaffSchema), registerstaffs)
+    .get("/automaticlogin", passport.authenticate('jwt', { session: false }), automaticlogin)
+    .post("/registerstaffs", passport.authenticate('jwt', { session: false }), zodBody(registerStaffSchema), registerstaffs)
     
     // Google OAuth
     .get("/google", passport.authenticate('google', { scope: ['profile', 'email'], session: false }))

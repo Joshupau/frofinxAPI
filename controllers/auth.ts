@@ -19,7 +19,17 @@ export const authlogin = async (
       return res.status(statusCode).json({ message: 'failed', data: result.message });
     }
 
-    res.cookie('sessionToken', result.data.token, { secure: true, sameSite: 'none' });
+    // Set cookie with appropriate settings for environment
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('sessionToken', result.data.token, { 
+      secure: isProduction,  // HTTPS only in production
+      sameSite: isProduction ? 'none' : 'lax',  // 'lax' for development, 'none' for production
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
+      path: '/'
+    });
+
+    console.log('✓ Login successful - cookie set for user:', username);
     return res.status(200).json({ message: 'success', data: { auth: result.data } });
   } catch (err) {
     next(err);
@@ -93,8 +103,7 @@ export const passportLogin = async (req: Request, res: Response) => {
         return res.status(400).json({ message: 'failed', data: info?.message || 'Authentication failed.' });
       }
 
-      const access = generateAccess(user)
-      
+      // Check if user is banned
       if (user.status === 'banned') {
         return res.status(403).json({ 
           message: 'failed', 
@@ -106,7 +115,20 @@ export const passportLogin = async (req: Request, res: Response) => {
         });
       }
 
-      // Return user data (JWT generation should be handled by login service)
+      // Generate access token
+      const access = generateAccess(user);
+      
+      // Set cookie with appropriate settings for environment
+      const isProduction = process.env.NODE_ENV === 'production';
+      res.cookie('sessionToken', access.access, { 
+        secure: isProduction,  // HTTPS only in production
+        sameSite: isProduction ? 'none' : 'lax',  // 'lax' for development, 'none' for production
+        httpOnly: true,
+        maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
+        path: '/'
+      });
+
+      console.log('✓ Passport login successful - cookie set for user:', user.username);
       return res.status(200).json({ message: 'success', data: access});
     })(req, res);
 }
