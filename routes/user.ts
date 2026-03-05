@@ -15,7 +15,6 @@ import * as ctrl from '../controllers/user.js';
 const router = Router();
 
 router
-    .get('/getreferrallink', ctrl.getreferrallink)
     .get('/getuserdetails', ctrl.getuserdetails)
     .post('/changepassworduser', zodBody(changePasswordUserBodySchema), ctrl.changepassworduser)
     .post('/updateuserprofile', zodBody(updateUserProfileBodySchema), ctrl.updateuserprofile)
@@ -27,8 +26,5 @@ router
     .get('/getplayerlist', zodQuery(getPlayerListQuerySchema), ctrl.getplayerlist)
     .post('/banunbanuser', zodBody(banUnbanUserBodySchema), ctrl.banunbanuser)
     .post('/multiplebanusers', zodBody(multipleBanUsersBodySchema), ctrl.multiplebanusers)
-    .get('/getplayercount', ctrl.getplayercount)
 
-router
-    .get('/lp/getplayercount', ctrl.getplayercount);
 export default router;

@@ -11,22 +11,6 @@ import type {
 } from '../ctypes/user.types.js';
 import * as userService from '../cservice/user.service.js';
 
-export const getreferrallink = async (req: Request, res: Response, next: NextFunction) => {
-    const { id } = req.user!;
-
-    try {
-        const result = await userService.getReferralLink(id);
-
-        if (result.error) {
-            const statusCode = result.statusCode || 400;
-            return res.status(statusCode).json({ message: "failed", data: result.message });
-        }
-
-        return res.json({ message: "success", data: result.data });
-    } catch (err) {
-        next(err);
-    }
-};
 
 export const getuserdetails = async (req: Request, res: Response, next: NextFunction) => {
     const { id, username } = req.user!;
@@ -223,17 +207,3 @@ export const multiplebanusers = async (req: Request, res: Response, next: NextFu
     }
 };
 
-export const getplayercount = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const result = await userService.getPlayerCount();
-
-        if (result.error) {
-            const statusCode = result.statusCode || 400;
-            return res.status(statusCode).json({ message: "failed", data: result.message });
-        }
-
-        return res.json({ message: "success", data: result.data });
-    } catch (err) {
-        next(err);
-    }
-};
