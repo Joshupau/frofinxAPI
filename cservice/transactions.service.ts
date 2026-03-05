@@ -202,7 +202,8 @@ export const list = async (
       Transactions.find(filter)
         .populate('wallet', 'name type currency')
         .populate('category', 'name type icon color')
-        .populate('toWallet', 'name type')
+        .populate('toWallet', 'name type currency')
+        .lean()
         .sort({ date: -1, createdAt: -1 })
         .skip(options.skip)
         .limit(options.limit),
@@ -214,7 +215,10 @@ export const list = async (
     return {
       error: false,
       data: {
-        items: transactions.map(tx => ({ id: tx._id, ...tx.toObject() })),
+        items: transactions.map(tx => ({ 
+          id: tx._id, 
+          ...tx
+        })),
         totalPages,
         currentPage: options.page,
         totalItems: totalDocuments
