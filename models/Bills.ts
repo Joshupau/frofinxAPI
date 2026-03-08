@@ -18,6 +18,7 @@ export interface IBill extends Document {
   status: 'active' | 'archived';
   lastPaidDate?: Date;
   nextDueDate?: Date; // for recurring bills
+  transaction?: mongoose.Types.ObjectId; // linked pending transaction
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -39,7 +40,8 @@ const BillSchema = new Schema<IBill>(
     notes: { type: String },
     status: { type: String, required: true, default: 'active', enum: ['active', 'archived'], index: true },
     lastPaidDate: { type: Date },
-    nextDueDate: { type: Date }
+    nextDueDate: { type: Date },
+    transaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transactions' }
   },
   {
     timestamps: true,

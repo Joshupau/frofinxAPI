@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { zodBody, zodQuery } from '../cvalidator/zod.middleware.js';
 import {
   createTransactionSchema,
@@ -6,11 +7,28 @@ import {
   deleteTransactionSchema,
   listTransactionsQuerySchema,
   monthlyReportQuerySchema,
-  categoryBreakdownQuerySchema
+  categoryBreakdownQuerySchema,
+  dashboardSummaryQuerySchema,
+  quickStatsQuerySchema
 } from '../cvalidator/transactions.validation.js';
 import * as ctrl from '../controllers/transactions.js';
 
 const router = Router();
+
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  fileFilter: (_req, file, cb) => {
+    const ok = file.mimetype === 'text/csv'
+      || file.mimetype === 'text/plain'
+      || file.originalname.toLowerCase().endsWith('.csv');
+    if (ok) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are accepted.'));
+    }
+  }
+});
 
 router
   .post('/create', zodBody(createTransactionSchema), ctrl.create)
@@ -18,6 +36,9 @@ router
   .post('/update', zodBody(updateTransactionSchema), ctrl.update)
   .post('/delete', zodBody(deleteTransactionSchema), ctrl.deleteTransaction)
   .get('/report/monthly', zodQuery(monthlyReportQuerySchema), ctrl.getMonthlyReport)
-  .get('/report/category', zodQuery(categoryBreakdownQuerySchema), ctrl.getCategoryBreakdown);
+  .get('/report/category', zodQuery(categoryBreakdownQuerySchema), ctrl.getCategoryBreakdown)
+  .post('/import', csvUpload.single('file'), ctrl.importTransactions)
+  .get('/summary', zodQuery(dashboardSummaryQuerySchema), ctrl.getSummary)
+  .get('/quick-stats', zodQuery(quickStatsQuerySchema), ctrl.getQuickStats);
 
 export default router;

@@ -20,7 +20,9 @@ export const createTransactionSchema = z.object({
   attachments: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   toWalletId: optionalObjectId,
-  billId: optionalObjectId
+  billId: optionalObjectId,
+  serviceFee: z.number().nonnegative('Service fee cannot be negative').optional(),
+  createBillForFee: z.boolean().optional()
 });
 
 export const updateTransactionSchema = z.object({
@@ -66,4 +68,17 @@ export const categoryBreakdownQuerySchema = z.object({
   startDate: z.string().datetime().optional().or(z.literal('')),
   endDate: z.string().datetime().optional().or(z.literal('')),
   walletId: optionalObjectId
+});
+
+
+export const dashboardSummaryQuerySchema = z.object({
+  month: z.string().regex(/^(0?[1-9]|1[0-2])$/).optional(),
+  year: z.string().regex(/^\d{4}$/).optional(),
+  walletId: z.string().regex(/^[0-9a-f]{24}$/i).optional()
+});
+
+
+export const quickStatsQuerySchema = z.object({
+  period: z.enum(['today', 'week', 'month', 'year', 'all']).optional(),
+  walletId: z.string().regex(/^[0-9a-f]{24}$/i).optional()
 });

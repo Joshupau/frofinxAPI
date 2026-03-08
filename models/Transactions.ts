@@ -13,6 +13,8 @@ export interface ITransaction extends Document {
   bill?: mongoose.Types.ObjectId; // linked bill if this is a bill payment
   tags: string[];
   toWallet?: mongoose.Types.ObjectId; // for transfer type
+  serviceFee?: number; // service fee for transfers
+  serviceFeeDeducted?: boolean; // whether the service fee was immediately deducted from the wallet
   status: 'completed' | 'pending' | 'cancelled';
   createdAt?: Date;
   updatedAt?: Date;
@@ -31,6 +33,8 @@ const TransactionSchema = new Schema<ITransaction>(
     bill: { type: mongoose.Schema.Types.ObjectId, ref: 'Bills', index: true },
     tags: [{ type: String }],
     toWallet: { type: mongoose.Schema.Types.ObjectId, ref: 'Wallets' },
+    serviceFee: { type: Number, default: 0 },
+    serviceFeeDeducted: { type: Boolean, default: false },
     status: { type: String, required: true, default: 'completed', enum: ['completed', 'pending', 'cancelled'], index: true }
   },
   {

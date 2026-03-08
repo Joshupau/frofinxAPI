@@ -4,7 +4,9 @@ import type {
   TransactionUpdateBody,
   TransactionDeleteBody,
   TransactionListQuery,
-  TransactionReportQuery
+  TransactionReportQuery,
+  DashboardSummaryQuery,
+  DashboardQuickStatsQuery
 } from '../ctypes/transactions.types.js';
 import * as transactionService from '../cservice/transactions.service.js';
 
@@ -19,7 +21,9 @@ export const create = async (req: Request, res: Response, next: NextFunction) =>
     attachments,
     tags,
     toWalletId,
-    billId
+    billId,
+    serviceFee,
+    createBillForFee
   } = req.validatedBody as TransactionCreateBody;
   const { id } = req.user!;
 
@@ -35,7 +39,9 @@ export const create = async (req: Request, res: Response, next: NextFunction) =>
       attachments,
       tags,
       toWalletId,
-      billId
+      billId,
+      serviceFee,
+      createBillForFee
     );
 
     if (result.error) {
@@ -170,6 +176,84 @@ export const getCategoryBreakdown = async (req: Request, res: Response, next: Ne
 
   try {
     const result = await transactionService.getCategoryBreakdown(id, type, startDate, endDate, walletId);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const importTransactions = async (req: Request, res: Response, next: NextFunction) => {
+  const { walletId, categoryId, preview } = req.body as { walletId: string; categoryId?: string; preview?: string };
+  const { id } = req.user!;
+
+  if (!req.file) {
+    return res.status(400).json({ message: 'failed', data: 'A CSV file is required.' });
+  }
+  if (!walletId || !/^[0-9a-fA-F]{24}$/.test(walletId)) {
+    return res.status(400).json({ message: 'failed', data: 'A valid walletId is required.' });
+  }
+  if (categoryId && !/^[0-9a-fA-F]{24}$/.test(categoryId)) {
+    return res.status(400).json({ message: 'failed', data: 'Invalid categoryId.' });
+  }
+
+  try {
+    const result = await transactionService.importTransactions(id, walletId, req.file.buffer, {
+      categoryId,
+      preview: preview === 'true' || preview === '1'
+    });
+
+    if (result.error) {
+      return res.status(result.statusCode || 400).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getSummary = async (req: Request, res: Response, next: NextFunction) => {
+  const { month, year, walletId } = req.query as DashboardSummaryQuery;
+  const { id } = req.user!;
+
+  try {
+    const result = await transactionService.getDashboardSummary(id, month, year, walletId);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getQuickStats = async (req: Request, res: Response, next: NextFunction) => {
+  const { period = 'month', walletId } = req.query as DashboardQuickStatsQuery;
+  const { id } = req.user!;
+
+  try {
+    const validPeriods = ['today', 'week', 'month', 'year', 'all'];
+    if (period && !validPeriods.includes(period)) {
+      return res.status(400).json({
+        message: 'failed',
+        data: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+      });
+    }
+
+    const result = await transactionService.getQuickStats(
+      id,
+      (period || 'month') as 'today' | 'week' | 'month' | 'year' | 'all',
+      walletId
+    );
 
     if (result.error) {
       const statusCode = result.statusCode || 400;

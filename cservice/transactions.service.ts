@@ -2,8 +2,10 @@ import mongoose from 'mongoose';
 import Transactions from '../models/Transactions.js';
 import Wallets from '../models/Wallets.js';
 import Bills from '../models/Bills.js';
-import type { TransactionServiceResponse } from '../ctypes/transactions.types.js';
+import Categories from '../models/Categories.js';
+import type { TransactionServiceResponse, DashboardServiceResponse, QuickStatsResponse } from '../ctypes/transactions.types.js';
 import { pageOptions } from '../utils/paginate.js';
+import { getDateRangeForPeriod, getMonthDateRange, calculateNetCashFlow, roundAmount } from '../utils/dashboard.utils.js';
 
 export const create = async (
   userId: string,
@@ -16,7 +18,9 @@ export const create = async (
   attachments?: string[],
   tags?: string[],
   toWalletId?: string,
-  billId?: string
+  billId?: string,
+  serviceFee?: number,
+  createBillForFee?: boolean
 ): Promise<TransactionServiceResponse> => {
   try {
     // Validate wallet ownership
@@ -68,16 +72,20 @@ export const create = async (
       }
     }
 
-    // Check sufficient balance for expense or transfer
-    if ((type === 'expense' || type === 'transfer') && wallet.balance < amount) {
+    // Check sufficient balance for expense or transfer (including service fee)
+    // Fee is only immediately deducted when createBillForFee is false
+    const immediateFeeCost = (!createBillForFee && serviceFee) ? serviceFee : 0;
+    const totalDeduction = type === 'transfer' ? (amount + immediateFeeCost) : amount;
+    if ((type === 'expense' || type === 'transfer') && wallet.balance < totalDeduction) {
       return {
         error: true,
-        message: 'Insufficient wallet balance.',
+        message: 'Insufficient wallet balance for transaction' + (immediateFeeCost ? ' and service fee' : '') + '.',
         statusCode: 400
       };
     }
 
     // Create transaction
+    const feeDeducted = type === 'transfer' && !!serviceFee && serviceFee > 0 && !createBillForFee;
     const transaction = await Transactions.create({
       owner: new mongoose.Types.ObjectId(userId),
       wallet: new mongoose.Types.ObjectId(walletId),
@@ -90,6 +98,8 @@ export const create = async (
       tags: tags || [],
       toWallet: toWalletId ? new mongoose.Types.ObjectId(toWalletId) : undefined,
       bill: billId ? new mongoose.Types.ObjectId(billId) : undefined,
+      serviceFee: serviceFee || 0,
+      serviceFeeDeducted: feeDeducted,
       status: 'completed'
     });
 
@@ -101,7 +111,7 @@ export const create = async (
       wallet.balance -= amount;
       await wallet.save();
     } else if (type === 'transfer' && toWallet) {
-      wallet.balance -= amount;
+      wallet.balance -= (amount + (feeDeducted ? (serviceFee || 0) : 0));
       toWallet.balance += amount;
       await Promise.all([wallet.save(), toWallet.save()]);
     }
@@ -116,6 +126,38 @@ export const create = async (
           lastPaidDate: transaction.date
         }
       );
+    }
+
+    // If createBillForFee is true and there's a service fee, create a bill + linked pending transaction for it
+    if (createBillForFee && serviceFee && serviceFee > 0) {
+      const feeDueDate = new Date(transaction.date);
+      feeDueDate.setDate(feeDueDate.getDate() + 1);
+
+      const pendingFeeTransaction = await Transactions.create({
+        owner: new mongoose.Types.ObjectId(userId),
+        wallet: new mongoose.Types.ObjectId(walletId),
+        amount: serviceFee,
+        type: 'expense',
+        description: `Service fee for transfer of ${amount}`,
+        date: feeDueDate,
+        attachments: [],
+        tags: [],
+        status: 'pending'
+      });
+
+      await Bills.create({
+        owner: new mongoose.Types.ObjectId(userId),
+        name: `Transfer Service Fee`,
+        amount: serviceFee,
+        dueDate: feeDueDate,
+        isRecurring: false,
+        wallet: new mongoose.Types.ObjectId(walletId),
+        reminder: false,
+        paymentStatus: 'unpaid',
+        notes: `Service fee for transfer transaction ID: ${transaction._id}`,
+        status: 'active',
+        transaction: pendingFeeTransaction._id
+      });
     }
 
     return {
@@ -198,6 +240,7 @@ export const list = async (
       filter.description = { $regex: filters.search, $options: 'i' };
     }
 
+
     const [transactions, totalDocuments] = await Promise.all([
       Transactions.find(filter)
         .populate('wallet', 'name type currency')
@@ -209,6 +252,7 @@ export const list = async (
         .limit(options.limit),
       Transactions.countDocuments(filter)
     ]);
+
 
     const totalPages = Math.ceil(totalDocuments / options.limit);
 
@@ -332,7 +376,8 @@ export const deleteTransaction = async (userId: string, id: string): Promise<Tra
       } else if (transaction.type === 'transfer' && transaction.toWallet) {
         const toWallet = await Wallets.findById(transaction.toWallet);
         if (toWallet) {
-          wallet.balance += transaction.amount;
+          const feeToRevert = transaction.serviceFeeDeducted ? (transaction.serviceFee || 0) : 0;
+          wallet.balance += transaction.amount + feeToRevert;
           toWallet.balance -= transaction.amount;
           await Promise.all([wallet.save(), toWallet.save()]);
         }
@@ -511,6 +556,441 @@ export const getCategoryBreakdown = async (
     return {
       error: true,
       message: 'Failed to generate category breakdown.',
+      statusCode: 400
+    };
+  }
+};
+
+// ─── CSV Import Helpers ───────────────────────────────────────────────────────
+
+function normalizeKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function findField(row: Record<string, string>, ...keys: string[]): string {
+  for (const key of keys) {
+    const norm = normalizeKey(key);
+    if (row[norm] !== undefined) return row[norm];
+    // fuzzy: strip underscores and compare
+    const plain = norm.replace(/_/g, '');
+    const match = Object.keys(row).find(k => k.replace(/_/g, '') === plain);
+    if (match !== undefined) return row[match];
+  }
+  return '';
+}
+
+function parseCSV(content: string): Record<string, string>[] {
+  const cleaned = content.replace(/^\uFEFF/, '');
+  const lines = cleaned.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return [];
+
+  const header = lines[0];
+  const sep = header.includes('\t') ? '\t' : header.includes(';') ? ';' : ',';
+
+  const parseLine = (line: string): string[] => {
+    const fields: string[] = [];
+    let cur = '';
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (c === sep && !inQ) {
+        fields.push(cur.trim());
+        cur = '';
+      } else {
+        cur += c;
+      }
+    }
+    fields.push(cur.trim());
+    return fields;
+  };
+
+  const headers = parseLine(header).map(h => normalizeKey(h));
+  return lines.slice(1).map(line => {
+    const vals = parseLine(line);
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => { row[h] = vals[i] ?? ''; });
+    return row;
+  });
+}
+
+function parseImportDate(s: string): Date | null {
+  if (!s?.trim()) return null;
+  const t = s.trim();
+  if (/^\d{4}[-/]\d{2}[-/]\d{2}$/.test(t)) {
+    const d = new Date(t.replace(/\//g, '-'));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (/^\d{8}$/.test(t)) {
+    const d = new Date(`${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(t)) {
+    const [day, month, year] = t.split(/[-/]/);
+    const d = new Date(`${year}-${month}-${day}`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const fallback = new Date(t);
+  return isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function parseImportAmount(s: string): number | null {
+  if (!s?.trim()) return null;
+  const c = s.trim().replace(/[€$£¥\s]/g, '');
+  // European format: 1.234,56 → 1234.56
+  const norm = c.includes(',') && c.includes('.')
+    ? c.replace(/\./g, '').replace(',', '.')
+    : c.includes(',') && !c.includes('.')
+    ? c.replace(',', '.')
+    : c;
+  const v = parseFloat(norm);
+  return isNaN(v) ? null : Math.abs(v);
+}
+
+function mapIndicator(s: string): 'income' | 'expense' | null {
+  const u = s.trim().toUpperCase();
+  if (['CRDT', 'CREDIT', 'C', 'CR'].includes(u)) return 'income';
+  if (['DBIT', 'DEBIT', 'D', 'DR'].includes(u)) return 'expense';
+  return null;
+}
+
+// ─── Import Transactions ──────────────────────────────────────────────────────
+
+export const importTransactions = async (
+  userId: string,
+  walletId: string,
+  csvBuffer: Buffer,
+  options?: {
+    categoryId?: string;
+    preview?: boolean;
+  }
+): Promise<TransactionServiceResponse> => {
+  try {
+    const wallet = await Wallets.findOne({
+      _id: new mongoose.Types.ObjectId(walletId),
+      owner: new mongoose.Types.ObjectId(userId),
+      status: 'active'
+    });
+    if (!wallet) {
+      return { error: true, message: 'Wallet not found or inactive.', statusCode: 404 };
+    }
+
+    const rows = parseCSV(csvBuffer.toString('utf-8'));
+    const allCategories = await Categories.find({}, '_id name').lean();
+
+    const valid: any[] = [];
+    const skipped: { row: number; reason: string }[] = [];
+
+    rows.forEach((row, idx) => {
+      const rowNum = idx + 2;
+
+      const bookDate      = findField(row, 'Book date', 'booking date', 'date', 'value date');
+      const amountStr     = findField(row, 'Amount', 'amount');
+      const indicator     = findField(row, 'Credit/debit indicator', 'credit debit indicator', 'indicator');
+      const description   = findField(row, 'Description', 'description', 'memo', 'narration');
+      const counterParty  = findField(row, 'Counter party name', 'counterparty name', 'beneficiary', 'payee', 'merchant');
+      const txRef         = findField(row, 'Transaction reference', 'transaction reference', 'reference', 'ref');
+      const txType        = findField(row, 'Transaction type', 'transaction type');
+      const txGroup       = findField(row, 'Transaction group', 'transaction group');
+      const csvCategory   = findField(row, 'Category', 'category');
+      const currency      = findField(row, 'Currency', 'currency');
+      const instructedAmt = findField(row, 'Instructed amount', 'instructed amount');
+      const exchangeRate  = findField(row, 'Currency exchange rate', 'exchange rate');
+      const instructedCur = findField(row, 'Instructed currency', 'instructed currency');
+
+      // Hard filter: no date
+      const parsedDate = parseImportDate(bookDate);
+      if (!parsedDate) {
+        skipped.push({ row: rowNum, reason: 'missing_date' });
+        return;
+      }
+
+      // Hard filter: no amount or zero
+      const parsedAmount = parseImportAmount(amountStr);
+      if (parsedAmount === null || parsedAmount === 0) {
+        skipped.push({ row: rowNum, reason: 'invalid_amount' });
+        return;
+      }
+
+      // Hard filter: no credit/debit indicator
+      const type = mapIndicator(indicator);
+      if (!type) {
+        skipped.push({ row: rowNum, reason: 'missing_indicator' });
+        return;
+      }
+
+      // Hard filter: completely unidentifiable — system internal booking
+      if (!description.trim() && !counterParty.trim() && !txRef.trim()) {
+        skipped.push({ row: rowNum, reason: 'unidentifiable_system_payment' });
+        return;
+      }
+
+      // Build description
+      let finalDesc = description.trim() || counterParty.trim() || txRef.trim();
+      if (counterParty.trim() && description.trim() && description.trim() !== counterParty.trim()) {
+        finalDesc = `${description.trim()} · ${counterParty.trim()}`;
+      }
+      // Append foreign currency note if applicable
+      if (instructedAmt.trim() && instructedCur.trim() && instructedCur.trim() !== currency.trim()) {
+        finalDesc += ` [${instructedCur.trim()} ${instructedAmt.trim()}${exchangeRate.trim() ? ` @ ${exchangeRate.trim()}` : ''}]`;
+      }
+
+      // Build tags
+      const tags: string[] = [];
+      if (txType.trim()) tags.push(txType.trim());
+      if (txGroup.trim() && txGroup.trim() !== txType.trim()) tags.push(txGroup.trim());
+
+      // Match category by name (case-insensitive)
+      let matchedCategoryId: mongoose.Types.ObjectId | undefined;
+      if (csvCategory.trim()) {
+        const cat = allCategories.find(
+          c => (c as any).name?.toLowerCase() === csvCategory.trim().toLowerCase()
+        );
+        if (cat) matchedCategoryId = (cat as any)._id;
+      }
+      if (!matchedCategoryId && options?.categoryId) {
+        matchedCategoryId = new mongoose.Types.ObjectId(options.categoryId);
+      }
+
+      valid.push({
+        date: parsedDate,
+        amount: parsedAmount,
+        type,
+        description: finalDesc,
+        tags,
+        categoryId: matchedCategoryId,
+        csvCategory: csvCategory.trim() || undefined
+      });
+    });
+
+    if (options?.preview) {
+      return {
+        error: false,
+        data: {
+          totalRows: rows.length,
+          willImport: valid.length,
+          willSkip: skipped.length,
+          skippedRows: skipped,
+          preview: valid
+        }
+      };
+    }
+
+    if (valid.length === 0) {
+      return {
+        error: false,
+        message: 'No valid transactions found to import.',
+        data: { totalRows: rows.length, imported: 0, skipped: skipped.length, skippedRows: skipped }
+      };
+    }
+
+    await Transactions.insertMany(valid.map(r => ({
+      owner: new mongoose.Types.ObjectId(userId),
+      wallet: new mongoose.Types.ObjectId(walletId),
+      amount: r.amount,
+      type: r.type,
+      description: r.description,
+      date: r.date,
+      tags: r.tags,
+      category: r.categoryId,
+      attachments: [],
+      status: 'completed'
+    })));
+
+    // Update wallet balance with the net effect of all imported transactions
+    const incomeTotal  = valid.filter(r => r.type === 'income').reduce((s: number, r: any) => s + r.amount, 0);
+    const expenseTotal = valid.filter(r => r.type === 'expense').reduce((s: number, r: any) => s + r.amount, 0);
+    wallet.balance += incomeTotal - expenseTotal;
+    await wallet.save();
+
+    return {
+      error: false,
+      message: `Successfully imported ${valid.length} transaction${valid.length !== 1 ? 's' : ''}.`,
+      data: {
+        totalRows: rows.length,
+        imported: valid.length,
+        skipped: skipped.length,
+        skippedRows: skipped
+      }
+    };
+  } catch (err) {
+    console.log(`Error importing transactions: ${err}`);
+    return { error: true, message: 'Failed to import transactions.', statusCode: 400 };
+  }
+};
+
+
+export const getDashboardSummary = async (
+  userId: string,
+  month?: string,
+  year?: string,
+  walletId?: string
+): Promise<DashboardServiceResponse> => {
+  try {
+    const now = new Date();
+    const targetMonth = month ? parseInt(month) : now.getMonth() + 1;
+    const targetYear = year ? parseInt(year) : now.getFullYear();
+
+    // Validate month
+    if (targetMonth < 1 || targetMonth > 12) {
+      return {
+        error: true,
+        message: 'Invalid month. Please provide a month between 1 and 12.',
+        statusCode: 400
+      };
+    }
+
+    const { startDate, endDate } = getMonthDateRange(targetMonth, targetYear);
+
+    const matchStage: any = {
+      owner: new mongoose.Types.ObjectId(userId),
+      // date: { $gte: startDate, $lte: endDate },
+      status: 'completed'
+    };
+
+    if (walletId) {
+      matchStage.wallet = new mongoose.Types.ObjectId(walletId);
+    }
+
+    // Aggregate to get all necessary metrics
+    const summary = await Transactions.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Initialize result object
+    const result: any = {
+      totalIncome: 0,
+      incomeCount: 0,
+      totalExpenses: 0,
+      expenseCount: 0,
+      totalTransfers: 0,
+      transferCount: 0,
+      totalTransactions: 0,
+      netCashFlow: 0,
+      month: targetMonth,
+      year: targetYear
+    };
+
+    // Process aggregation results
+    summary.forEach(item => {
+      if (item._id === 'income') {
+        result.totalIncome = roundAmount(item.total);
+        result.incomeCount = item.count;
+      } else if (item._id === 'expense') {
+        result.totalExpenses = roundAmount(item.total);
+        result.expenseCount = item.count;
+      } else if (item._id === 'transfer') {
+        result.totalTransfers = roundAmount(item.total);
+        result.transferCount = item.count;
+      }
+    });
+
+    // Calculate derived metrics
+    result.totalTransactions = result.incomeCount + result.expenseCount + result.transferCount;
+    result.netCashFlow = roundAmount(calculateNetCashFlow(result.totalIncome, result.totalExpenses));
+
+    return {
+      error: false,
+      data: result
+    };
+  } catch (err) {
+    console.log(`Error getting dashboard summary: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to retrieve dashboard summary.',
+      statusCode: 400
+    };
+  }
+};
+
+/**
+ * Get quick stats for a specific period (today, week, month, year, all)
+ * Shows: income, expenses, transfers, transaction count
+ */
+export const getQuickStats = async (
+  userId: string,
+  period: 'today' | 'week' | 'month' | 'year' | 'all' = 'month',
+  walletId?: string
+): Promise<QuickStatsResponse> => {
+  try {
+    const { startDate, endDate } = getDateRangeForPeriod(period);
+
+    const matchStage: any = {
+      owner: new mongoose.Types.ObjectId(userId),
+      date: { $gte: startDate, $lt: endDate },
+      status: 'completed'
+    };
+
+    if (walletId) {
+      matchStage.wallet = new mongoose.Types.ObjectId(walletId);
+    }
+
+    const stats = await Transactions.aggregate([
+      { $match: matchStage },
+      {
+        $facet: {
+          byType: [
+            {
+              $group: {
+                _id: '$type',
+                total: { $sum: '$amount' },
+                count: { $sum: 1 }
+              }
+            }
+          ],
+          totalCount: [
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 }
+              }
+            }
+          ]
+        }
+      }
+    ]);
+
+    const byType = stats[0].byType;
+    const totalCount = stats[0].totalCount[0]?.count || 0;
+
+    const result: any = {
+      period: period,
+      income: 0,
+      expenses: 0,
+      transfers: 0,
+      transactions: totalCount,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    };
+
+    byType.forEach((item: any) => {
+      if (item._id === 'income') {
+        result.income = roundAmount(item.total);
+      } else if (item._id === 'expense') {
+        result.expenses = roundAmount(item.total);
+      } else if (item._id === 'transfer') {
+        result.transfers = roundAmount(item.total);
+      }
+    });
+
+    return {
+      error: false,
+      data: result
+    };
+  } catch (err) {
+    console.log(`Error getting quick stats: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to retrieve quick stats.',
       statusCode: 400
     };
   }

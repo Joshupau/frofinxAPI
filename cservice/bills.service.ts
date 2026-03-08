@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import Bills from '../models/Bills.js';
+import Transactions from '../models/Transactions.js';
+import Wallets from '../models/Wallets.js';
 import type { BillServiceResponse } from '../ctypes/bills.types.js';
 import { pageOptions } from '../utils/paginate.js';
 
@@ -40,6 +42,25 @@ export const create = async (
       paymentStatus: 'unpaid',
       status: 'active'
     });
+
+    // Auto-create a pending transaction representing this unpaid bill
+    if (walletId) {
+      const pendingTransaction = await Transactions.create({
+        owner: new mongoose.Types.ObjectId(userId),
+        wallet: new mongoose.Types.ObjectId(walletId),
+        category: categoryId ? new mongoose.Types.ObjectId(categoryId) : undefined,
+        amount: amount,
+        type: 'expense',
+        description: `Bill: ${name}`,
+        date: new Date(dueDate),
+        attachments: [],
+        tags: [],
+        bill: bill._id,
+        status: 'pending'
+      });
+
+      await Bills.findByIdAndUpdate(bill._id, { transaction: pendingTransaction._id });
+    }
 
     return {
       error: false,
@@ -225,6 +246,41 @@ export const markPaid = async (
       updateData.paymentStatus = 'paid';
     } else {
       updateData.paymentStatus = 'partial';
+    }
+
+    // Complete the linked pending transaction and deduct from wallet
+    if (bill.transaction && bill.wallet) {
+      const wallet = await Wallets.findOne({
+        _id: bill.wallet,
+        owner: new mongoose.Types.ObjectId(userId),
+        status: 'active'
+      });
+
+      if (!wallet) {
+        return {
+          error: true,
+          message: 'Linked wallet not found or inactive.',
+          statusCode: 404
+        };
+      }
+
+      if (wallet.balance < amountPaid) {
+        return {
+          error: true,
+          message: 'Insufficient wallet balance to pay this bill.',
+          statusCode: 400
+        };
+      }
+
+      wallet.balance -= amountPaid;
+      await Promise.all([
+        wallet.save(),
+        Transactions.findByIdAndUpdate(bill.transaction, {
+          status: 'completed',
+          amount: amountPaid,
+          date: paymentDate
+        })
+      ]);
     }
 
     // If recurring, calculate next due date
