@@ -67,7 +67,8 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
     minAmount,
     maxAmount,
     search,
-    status
+    status,
+    tags
   } = req.validatedQuery as TransactionListQuery;
   const { id } = req.user!;
 
@@ -81,7 +82,8 @@ export const list = async (req: Request, res: Response, next: NextFunction) => {
       minAmount,
       maxAmount,
       search,
-      status
+      status,
+      tags
     });
 
     if (result.error) {
@@ -249,11 +251,102 @@ export const getQuickStats = async (req: Request, res: Response, next: NextFunct
       });
     }
 
+    const aggregatedResult: any = {}
     const result = await transactionService.getQuickStats(
       id,
       (period || 'month') as 'today' | 'week' | 'month' | 'year' | 'all',
       walletId
     );
+
+    const spentTodayResult = await transactionService.getSpentToday(id, walletId);
+    if (!spentTodayResult.error) {
+      aggregatedResult['spentToday'] = spentTodayResult.data;
+    }
+
+    const topCategoryResult = await transactionService.getTopCategoryToday(id, walletId);
+    if (!topCategoryResult.error) {
+      aggregatedResult['topCategory'] = topCategoryResult.data;
+    }
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    aggregatedResult['stats'] = result.data;
+
+    return res.status(200).json({ message: 'success', data: aggregatedResult });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAllTags = async (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.user!;
+
+  try {
+    const result = await transactionService.getAllUserTags(id);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getSpentToday = async (req: Request, res: Response, next: NextFunction) => {
+  const { walletId } = req.validatedQuery as any;
+  const { id } = req.user!;
+
+  try {
+    const result = await transactionService.getSpentToday(id, walletId);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAnalytics = async (req: Request, res: Response, next: NextFunction) => {
+  const { period, walletId, startDate, endDate } = req.validatedQuery as any;
+  const { id } = req.user!;
+
+  try {
+    if (!period || !['daily', 'weekly', 'yearly'].includes(period)) {
+      return res.status(400).json({
+        message: 'failed',
+        data: 'Period must be one of: daily, weekly, yearly'
+      });
+    }
+
+    const result = await transactionService.getAnalytics(id, period, walletId, startDate, endDate);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getTopCategoryToday = async (req: Request, res: Response, next: NextFunction) => {
+  const { walletId } = req.validatedQuery as any;
+  const { id } = req.user!;
+
+  try {
+    const result = await transactionService.getTopCategoryToday(id, walletId);
 
     if (result.error) {
       const statusCode = result.statusCode || 400;

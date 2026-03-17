@@ -82,3 +82,18 @@ export const quickStatsQuerySchema = z.object({
   period: z.enum(['today', 'week', 'month', 'year', 'all']).optional(),
   walletId: z.string().regex(/^[0-9a-f]{24}$/i).optional()
 });
+
+export const spentTodayQuerySchema = z.object({
+  walletId: z.string().regex(/^[0-9a-f]{24}$/i).optional()
+});
+
+export const analyticsQuerySchema = z.object({
+  period: z.enum(['daily', 'weekly', 'yearly']),
+  walletId: z.string().regex(/^[0-9a-f]{24}$/i).optional(),
+  startDate: dateOrDateTime.optional().or(z.literal('')),
+  endDate: dateOrDateTime.optional().or(z.literal(''))
+});
+
+export const topCategoryTodayQuerySchema = z.object({
+  walletId: z.string().regex(/^[0-9a-f]{24}$/i).optional()
+});

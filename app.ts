@@ -1,3 +1,7 @@
+import dns from "node:dns"
+
+dns.setServers(['1.1.1.1', '8.8.8.8']);
+
 import express from "express";
 import mongoose from "mongoose";
 import bodyParser from "body-parser";
@@ -6,6 +10,7 @@ import type { RequestHandler } from "express";
 import http from "http";
 import cors from "cors";
 import dotenv from "dotenv";
+import morgan from "morgan";
 
 // Load environment variables FIRST, before importing anything that uses them
 dotenv.config();
@@ -47,6 +52,7 @@ app.use(bodyParser.json({ limit: "50mb" }))
 app.use(bodyParser.urlencoded({ limit: "50mb", extended: false, parameterLimit: 50000 }))
 app.use(cookieParser() as RequestHandler);
 app.use(passport.initialize());
+app.use(morgan('dev'));
 
 routers(app);
 

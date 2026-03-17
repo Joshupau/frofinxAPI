@@ -9,7 +9,10 @@ import {
   monthlyReportQuerySchema,
   categoryBreakdownQuerySchema,
   dashboardSummaryQuerySchema,
-  quickStatsQuerySchema
+  quickStatsQuerySchema,
+  spentTodayQuerySchema,
+  analyticsQuerySchema,
+  topCategoryTodayQuerySchema
 } from '../cvalidator/transactions.validation.js';
 import * as ctrl from '../controllers/transactions.js';
 
@@ -39,6 +42,10 @@ router
   .get('/report/category', zodQuery(categoryBreakdownQuerySchema), ctrl.getCategoryBreakdown)
   .post('/import', csvUpload.single('file'), ctrl.importTransactions)
   .get('/summary', zodQuery(dashboardSummaryQuerySchema), ctrl.getSummary)
-  .get('/quick-stats', zodQuery(quickStatsQuerySchema), ctrl.getQuickStats);
+  .get('/quick-stats', zodQuery(quickStatsQuerySchema), ctrl.getQuickStats)
+  .get('/spent-today', zodQuery(spentTodayQuerySchema), ctrl.getSpentToday)
+  .get('/analytics', zodQuery(analyticsQuerySchema), ctrl.getAnalytics)
+  .get('/top-category-today', zodQuery(topCategoryTodayQuerySchema), ctrl.getTopCategoryToday)
+  .get('/tags', ctrl.getAllTags);
 
 export default router;

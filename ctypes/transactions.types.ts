@@ -44,6 +44,7 @@ export interface TransactionListQuery {
   maxAmount?: string;
   search?: string;
   status?: 'completed' | 'pending' | 'cancelled';
+  tags?: string[]; // array of tags to filter by
 }
 
 export interface TransactionReportQuery {
@@ -113,5 +114,85 @@ export interface QuickStatsResponse {
   error: boolean;
   message?: string;
   data?: QuickStats;
+  statusCode?: number;
+}
+
+// Analytics type definitions
+
+export interface SpentTodayQuery {
+  walletId?: string;
+}
+
+export interface SpentTodayData {
+  totalSpent: number;
+  transactionCount: number;
+  date: string;
+}
+
+export interface SpentTodayResponse {
+  error: boolean;
+  message?: string;
+  data?: SpentTodayData;
+  statusCode?: number;
+}
+
+export interface AnalyticsQuery {
+  period: 'daily' | 'weekly' | 'yearly';
+  walletId?: string;
+  startDate?: string; // ISO date for custom range (only for daily)
+  endDate?: string;   // ISO date for custom range (only for daily)
+}
+
+export interface AnalyticsDataPoint {
+  date?: string;         // for daily period: YYYY-MM-DD
+  week?: number;         // for weekly period: week number
+  month?: number;        // for weekly period: month number
+  year?: number;         // for yearly period: YYYY
+  expenses: number;
+  income: number;
+  net: number;
+  transactionCount?: number;
+}
+
+export interface AnalyticsData {
+  period: 'daily' | 'weekly' | 'yearly';
+  walletId?: string;
+  data: AnalyticsDataPoint[];
+  summary?: {
+    totalIncome: number;
+    totalExpenses: number;
+    totalNet: number;
+    transactionCount: number;
+  };
+}
+
+export interface AnalyticsResponse {
+  error: boolean;
+  message?: string;
+  data?: AnalyticsData;
+  statusCode?: number;
+}
+
+// Top Category Today
+
+export interface TopCategoryTodayQuery {
+  walletId?: string;
+}
+
+export interface TopCategoryTodayData {
+  categoryId: string;
+  categoryName: string;
+  categoryIcon?: string;
+  categoryColor?: string;
+  totalSpent: number;
+  transactionCount: number;
+  percentageOfDay: number;
+  insight: string;
+}
+
+export interface TopCategoryTodayResponse {
+  error: boolean;
+  message?: string;
+  data?: TopCategoryTodayData;
   statusCode?: number;
 }

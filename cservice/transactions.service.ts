@@ -3,9 +3,12 @@ import Transactions from '../models/Transactions.js';
 import Wallets from '../models/Wallets.js';
 import Bills from '../models/Bills.js';
 import Categories from '../models/Categories.js';
+import FinanceAgent from '../models/Finance-agent.js';
 import type { TransactionServiceResponse, DashboardServiceResponse, QuickStatsResponse } from '../ctypes/transactions.types.js';
 import { pageOptions } from '../utils/paginate.js';
 import { getDateRangeForPeriod, getMonthDateRange, calculateNetCashFlow, roundAmount } from '../utils/dashboard.utils.js';
+import { generateAIInsight } from '../utils/ai-insight.js';
+import * as financeAgentCtrl from './finance-agent.service.js';
 
 export const create = async (
   userId: string,
@@ -189,6 +192,7 @@ export const list = async (
     maxAmount?: string;
     search?: string;
     status?: string;
+    tags?: string[];
   }
 ): Promise<TransactionServiceResponse> => {
   try {
@@ -238,6 +242,10 @@ export const list = async (
 
     if (filters?.search) {
       filter.description = { $regex: filters.search, $options: 'i' };
+    }
+
+    if (filters?.tags && filters.tags.length > 0) {
+      filter.tags = { $in: filters.tags };
     }
 
 
@@ -686,12 +694,38 @@ export const importTransactions = async (
     rows.forEach((row, idx) => {
       const rowNum = idx + 2;
 
-      const bookDate      = findField(row, 'Book date', 'booking date', 'date', 'value date');
-      const amountStr     = findField(row, 'Amount', 'amount');
-      const indicator     = findField(row, 'Credit/debit indicator', 'credit debit indicator', 'indicator');
+      // Try combined date/time first, then separate date/time, then fallback patterns
+      let bookDate = findField(row, 'Date and Time', 'date and time', 'datetime');
+      if (!bookDate) {
+        const dateField = findField(row, 'Date', 'date', 'book date', 'booking date', 'value date');
+        const timeField = findField(row, 'Time', 'time', 'hour', 'hours');
+        bookDate = timeField ? `${dateField} ${timeField}` : dateField;
+      }
+
+      // Handle separate Debit/Credit columns (GCash format)
+      const debitStr     = findField(row, 'Debit', 'debit');
+      const creditStr    = findField(row, 'Credit', 'credit');
+      
+      // If we have Debit/Credit split, derive amount and indicator
+      let amountStr = '';
+      let indicator = '';
+      if (debitStr?.trim() || creditStr?.trim()) {
+        if (debitStr?.trim()) {
+          amountStr = debitStr;
+          indicator = 'DEBIT';
+        } else if (creditStr?.trim()) {
+          amountStr = creditStr;
+          indicator = 'CREDIT';
+        }
+      } else {
+        // Fallback to traditional Amount + Indicator columns
+        amountStr = findField(row, 'Amount', 'amount');
+        indicator = findField(row, 'Credit/debit indicator', 'credit debit indicator', 'indicator');
+      }
+
       const description   = findField(row, 'Description', 'description', 'memo', 'narration');
       const counterParty  = findField(row, 'Counter party name', 'counterparty name', 'beneficiary', 'payee', 'merchant');
-      const txRef         = findField(row, 'Transaction reference', 'transaction reference', 'reference', 'ref');
+      const txRef         = findField(row, 'Transaction reference', 'transaction reference', 'reference', 'ref', 'reference no');
       const txType        = findField(row, 'Transaction type', 'transaction type');
       const txGroup       = findField(row, 'Transaction group', 'transaction group');
       const csvCategory   = findField(row, 'Category', 'category');
@@ -991,6 +1025,387 @@ export const getQuickStats = async (
     return {
       error: true,
       message: 'Failed to retrieve quick stats.',
+      statusCode: 400
+    };
+  }
+};
+
+export const getAllUserTags = async (userId: string): Promise<TransactionServiceResponse> => {
+  try {
+    const tags = await Transactions.aggregate([
+      {
+        $match: {
+          owner: new mongoose.Types.ObjectId(userId),
+          status: 'completed'
+        }
+      },
+      {
+        $unwind: '$tags'
+      },
+      {
+        $group: {
+          _id: '$tags',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      },
+      {
+        $project: {
+          tag: '$_id',
+          count: 1,
+          _id: 0
+        }
+      }
+    ]);
+
+    return {
+      error: false,
+      data: {
+        tags: tags.map(item => item.tag),
+        tagStats: tags  // [{tag: "Transfer", count: 156}, {tag: "Payment", count: 295}, ...]
+      }
+    };
+  } catch (err) {
+    console.log(`Error getting user tags: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to retrieve user tags.',
+      statusCode: 400
+    };
+  }
+};
+
+export const getSpentToday = async (userId: string, walletId?: string): Promise<TransactionServiceResponse> => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const matchStage: any = {
+      owner: new mongoose.Types.ObjectId(userId),
+      type: 'expense',
+      status: 'completed',
+      date: {
+        $gte: today,
+        $lt: tomorrow
+      }
+    };
+
+    if (walletId) {
+      matchStage.wallet = new mongoose.Types.ObjectId(walletId);
+    }
+
+    const result = await Transactions.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: null,
+          totalSpent: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const data = result.length > 0 ? result[0] : { totalSpent: 0, count: 0 };
+
+    return {
+      error: false,
+      data: {
+        totalSpent: roundAmount(data.totalSpent),
+        transactionCount: data.count,
+        date: today.toISOString().split('T')[0]
+      }
+    };
+  } catch (err) {
+    console.log(`Error getting spent today: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to retrieve spending for today.',
+      statusCode: 400
+    };
+  }
+};
+
+export const getAnalytics = async (
+  userId: string,
+  period: 'daily' | 'weekly' | 'yearly',
+  walletId?: string,
+  _startDate?: string,
+  _endDate?: string
+): Promise<TransactionServiceResponse> => {
+  try {
+    const matchStage: any = {
+      owner: new mongoose.Types.ObjectId(userId),
+      status: 'completed',
+      type: { $in: ['income', 'expense'] }
+    };
+
+    if (walletId) {
+      matchStage.wallet = new mongoose.Types.ObjectId(walletId);
+    }
+
+    // Set date range based on period
+    let start: Date;
+    const end = new Date();
+
+    if (period === 'daily') {
+      // Default to last 30 days for daily
+      start = new Date();
+      start.setDate(start.getDate() - 30);
+    } else if (period === 'weekly') {
+      // Last 52 weeks
+      start = new Date();
+      start.setDate(start.getDate() - 364);
+    } else {
+      // period === 'yearly' - Last 5 years
+      start = new Date();
+      start.setFullYear(start.getFullYear() - 5);
+    }
+
+    matchStage.date = {
+      $gte: start,
+      $lte: end
+    };
+
+    let groupStage: any = {};
+
+    if (period === 'daily') {
+      groupStage = {
+        _id: {
+          year: { $year: '$date' },
+          month: { $month: '$date' },
+          day: { $dayOfMonth: '$date' }
+        },
+        totalIncome: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+        totalExpenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        count: { $sum: 1 }
+      };
+    } else if (period === 'weekly') {
+      groupStage = {
+        _id: {
+          year: { $year: '$date' },
+          week: { $week: '$date' },
+          month: { $month: '$date' }
+        },
+        totalIncome: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+        totalExpenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        count: { $sum: 1 }
+      };
+    } else if (period === 'yearly') {
+      groupStage = {
+        _id: { $year: '$date' },
+        totalIncome: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+        totalExpenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        count: { $sum: 1 }
+      };
+    }
+
+    const results = await Transactions.aggregate([
+      { $match: matchStage },
+      { $group: groupStage },
+      { $sort: { _id: -1 } }
+    ]);
+
+    const data = results.map((item: any) => {
+      const baseData: any = {
+        expenses: roundAmount(item.totalExpenses),
+        income: roundAmount(item.totalIncome),
+        net: roundAmount(item.totalIncome - item.totalExpenses),
+        transactionCount: item.count
+      };
+
+      if (period === 'daily') {
+        baseData.date = `${item._id.year}-${String(item._id.month).padStart(2, '0')}-${String(item._id.day).padStart(2, '0')}`;
+      } else if (period === 'weekly') {
+        baseData.week = item._id.week;
+        baseData.month = item._id.month;
+        baseData.year = item._id.year;
+      } else if (period === 'yearly') {
+        baseData.year = item._id;
+      }
+
+      return baseData;
+    });
+
+    const summary = {
+      totalIncome: roundAmount(data.reduce((sum: number, item: any) => sum + item.income, 0)),
+      totalExpenses: roundAmount(data.reduce((sum: number, item: any) => sum + item.expenses, 0)),
+      totalNet: roundAmount(data.reduce((sum: number, item: any) => sum + item.net, 0)),
+      transactionCount: data.reduce((sum: number, item: any) => sum + item.transactionCount, 0)
+    };
+
+    return {
+      error: false,
+      data: {
+        period,
+        walletId,
+        data,
+        summary
+      }
+    };
+  } catch (err) {
+    console.log(`Error getting analytics: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to retrieve analytics data.',
+      statusCode: 400
+    };
+  }
+};
+
+export const getTopCategoryToday = async (userId: string, walletId?: string): Promise<TransactionServiceResponse> => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const matchStage: any = {
+      owner: new mongoose.Types.ObjectId(userId),
+      type: 'expense',
+      status: 'completed',
+      date: {
+        $gte: today,
+        $lt: tomorrow
+      }
+    };
+
+    if (walletId) {
+      matchStage.wallet = new mongoose.Types.ObjectId(walletId);
+    }
+
+    // Get total spent today
+    const todayTotal = await Transactions.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    const totalSpentToday = todayTotal.length > 0 ? todayTotal[0].total : 0;
+
+    if (totalSpentToday === 0) {
+      return {
+        error: false,
+        data: {
+          categoryId: '',
+          categoryName: 'No expenses',
+          totalSpent: 0,
+          transactionCount: 0,
+          percentageOfDay: 0,
+          insight: '💚 Great job! You haven\'t spent anything today – financial discipline unlocked!'
+        }
+      };
+    }
+
+    // Get top category
+    const topCategory = await Transactions.aggregate([
+      { $match: matchStage },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'category',
+          foreignField: '_id',
+          as: 'categoryData'
+        }
+      },
+      {
+        $lookup: {
+          from: 'wallets',
+          localField: 'wallet',
+          foreignField: '_id',
+          as: 'walletData'
+        }
+      },
+      {
+        $group: {
+          _id: '$category',
+          categoryName: { $first: { $arrayElemAt: ['$categoryData.name', 0] } },
+          categoryIcon: { $first: { $arrayElemAt: ['$categoryData.icon', 0] } },
+          categoryColor: { $first: { $arrayElemAt: ['$categoryData.color', 0] } },
+          totalSpent: { $sum: '$amount' },
+          count: { $sum: 1 },
+          descriptions: { $push: '$description' }
+        }
+      },
+      { $sort: { totalSpent: -1 } },
+      { $limit: 1 }
+    ]);
+
+    if (topCategory.length === 0) {
+      return {
+        error: false,
+        data: {
+          categoryId: '',
+          categoryName: 'Uncategorized',
+          totalSpent: totalSpentToday,
+          transactionCount: 0,
+          percentageOfDay: 100,
+          insight: `📋 All your spending today is uncategorized. ${totalSpentToday} spent with no label!`
+        }
+      };
+    }
+
+    const top = topCategory[0];
+    const percentageOfDay = (top.totalSpent / totalSpentToday) * 100;
+
+    // Check if finance agent for this category already exists today FIRST
+    const existingAgent = await FinanceAgent.findOne({
+      owner: new mongoose.Types.ObjectId(userId),
+      category: top._id?.toString() || '',
+      createdAt: { $gte: today, $lt: tomorrow }
+    });
+
+    let insight: string;
+
+    // create new if the category is different or if no agent exists yet for today, otherwise reuse existing agent's insight
+    if (existingAgent) {
+      // Reuse existing insight from the description field
+      insight = existingAgent.description;
+    } else {
+      // Only generate AI insight if we need to create a new agent
+      const aiInsight = await generateAIInsight(
+        top.categoryName || 'Unknown',
+        top.totalSpent,
+        top.count,
+        percentageOfDay,
+        top.descriptions
+      );
+      insight = aiInsight;
+
+      // Create new finance agent with the generated insight
+      await financeAgentCtrl.create(
+        userId,
+        top.walletId?.toString() || '',
+        top._id?.toString() || '',
+        `Top category today: ${top.categoryName || 'Uncategorized'} with ${roundAmount(top.totalSpent)} spent across ${top.count} transactions, making up ${percentageOfDay.toFixed(1)}% of today's expenses. Insight: ${insight}`
+      );
+    }
+
+    return {
+      error: false,
+      data: {
+        categoryId: top._id?.toString() || '',
+        categoryName: top.categoryName || 'Uncategorized',
+        categoryIcon: top.categoryIcon,
+        categoryColor: top.categoryColor,
+        totalSpent: roundAmount(top.totalSpent),
+        transactionCount: top.count,
+        percentageOfDay: parseFloat(percentageOfDay.toFixed(1)),
+        insight
+      }
+    };
+  } catch (err) {
+    console.log(`Error getting top category today: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to retrieve top category.',
       statusCode: 400
     };
   }
