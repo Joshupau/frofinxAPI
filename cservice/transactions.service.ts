@@ -6,8 +6,10 @@ import Categories from '../models/Categories.js';
 import FinanceAgent from '../models/Finance-agent.js';
 import type { TransactionServiceResponse, DashboardServiceResponse, QuickStatsResponse } from '../ctypes/transactions.types.js';
 import { pageOptions } from '../utils/paginate.js';
-import { getDateRangeForPeriod, getMonthDateRange, calculateNetCashFlow, roundAmount } from '../utils/dashboard.utils.js';
+import { getMonthDateRange, calculateNetCashFlow, roundAmount } from '../utils/dashboard.utils.js';
+import { getDateFilter, getDateRange } from '../utils/dateFilters.utils.js';
 import { generateAIInsight } from '../utils/ai-insight.js';
+import { getMonthAbbreviation } from '../utils/datetimetools.js';
 import * as financeAgentCtrl from './finance-agent.service.js';
 
 export const create = async (
@@ -956,13 +958,29 @@ export const getQuickStats = async (
   walletId?: string
 ): Promise<QuickStatsResponse> => {
   try {
-    const { startDate, endDate } = getDateRangeForPeriod(period);
+    // Get date range and match stage based on period
+    let daterange: { startDate: Date; endDate: Date };
+    let matchStage: any;
 
-    const matchStage: any = {
-      owner: new mongoose.Types.ObjectId(userId),
-      date: { $gte: startDate, $lt: endDate },
-      status: 'completed'
-    };
+    if (period === 'all') {
+      const now = new Date();
+      daterange = { startDate: new Date(2000, 0, 1), endDate: now };
+      matchStage = {
+        owner: new mongoose.Types.ObjectId(userId),
+        date: { $gte: daterange.startDate, $lte: daterange.endDate },
+        status: 'completed'
+      };
+    } else if (period === 'today') {
+      matchStage = getDateFilter(userId, 'day');
+      daterange = getDateRange('day');
+    } else if (period === 'week') {
+      matchStage = getDateFilter(userId, 'week');
+      daterange = getDateRange('week');
+    } else {
+      // month or year
+      matchStage = getDateFilter(userId, period as 'month' | 'year');
+      daterange = getDateRange(period as 'month' | 'year');
+    }
 
     if (walletId) {
       matchStage.wallet = new mongoose.Types.ObjectId(walletId);
@@ -1002,8 +1020,8 @@ export const getQuickStats = async (
       expenses: 0,
       transfers: 0,
       transactions: totalCount,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString()
+      startDate: daterange.startDate.toISOString(),
+      endDate: daterange.endDate.toISOString()
     };
 
     byType.forEach((item: any) => {
@@ -1406,6 +1424,248 @@ export const getTopCategoryToday = async (userId: string, walletId?: string): Pr
     return {
       error: true,
       message: 'Failed to retrieve top category.',
+      statusCode: 400
+    };
+  }
+};
+
+
+export const getChartData = async (
+  userId: string,
+  period: 'today' | 'week' | 'month' | 'year' | 'all' = 'month',
+  walletId?: string
+): Promise<any> => {
+  try {
+    const now = new Date();
+    let dateRange: { startDate: Date; endDate: Date };
+    let matchStage: any;
+    let groupStage: any;
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    if (period === 'today') {
+      // Group by hour (0-23)
+      dateRange = getDateRange('day');
+      matchStage = getDateFilter(userId, 'day');
+
+      groupStage = {
+        _id: { $hour: '$date' },
+        income: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+        expenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        transfers: { $sum: { $cond: [{ $eq: ['$type', 'transfer'] }, '$amount', 0] } }
+      };
+    } else if (period === 'week') {
+      // Group by day of week (0-6, where 0 is Sunday)
+      dateRange = getDateRange('week');
+      matchStage = getDateFilter(userId, 'week');
+
+      groupStage = {
+        _id: { $dayOfWeek: '$date' },
+        income: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+        expenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        transfers: { $sum: { $cond: [{ $eq: ['$type', 'transfer'] }, '$amount', 0] } }
+      };
+    } else if (period === 'month') {
+      // Group by date (1-31)
+      dateRange = getDateRange('month');
+      matchStage = getDateFilter(userId, 'month');
+
+      groupStage = {
+        _id: { $dayOfMonth: '$date' },
+        income: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+        expenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        transfers: { $sum: { $cond: [{ $eq: ['$type', 'transfer'] }, '$amount', 0] } }
+      };
+    } else if (period === 'year') {
+      // period === 'year' - Group by month (1-12)
+      dateRange = getDateRange('year');
+      matchStage = getDateFilter(userId, 'year');
+
+      groupStage = {
+        _id: { $month: '$date' },
+        income: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+        expenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        transfers: { $sum: { $cond: [{ $eq: ['$type', 'transfer'] }, '$amount', 0] } }
+      };
+    } else {
+      // period === 'all' - Group by year across all time
+      matchStage = {
+        owner: new mongoose.Types.ObjectId(userId),
+        status: 'completed'
+      };
+
+      if (walletId) {
+        matchStage.wallet = new mongoose.Types.ObjectId(walletId);
+      }
+
+      groupStage = {
+        _id: { $year: '$date' },
+        income: { $sum: { $cond: [{ $eq: ['$type', 'income'] }, '$amount', 0] } },
+        expenses: { $sum: { $cond: [{ $eq: ['$type', 'expense'] }, '$amount', 0] } },
+        transfers: { $sum: { $cond: [{ $eq: ['$type', 'transfer'] }, '$amount', 0] } }
+      };
+
+      // Initialize default date range for 'all' period
+      dateRange = {
+        startDate: new Date(2000, 0, 1),
+        endDate: now
+      };
+    } 
+
+    // Add wallet filter if provided (only for non-'all' periods, as 'all' already handles it)
+    if (period !== 'all') {
+      if (walletId) {
+        matchStage.wallet = new mongoose.Types.ObjectId(walletId);
+      }
+
+      // Add status filter
+      matchStage.status = 'completed';
+    }
+
+    // Aggregation
+    const results = await Transactions.aggregate([
+      { $match: matchStage },
+      { $group: groupStage },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Transform results based on period
+    let dataPoints: any[] = [];
+    let totalIncome = 0;
+    let totalExpenses = 0;
+    let totalTransfers = 0;
+
+    if (period === 'today') {
+      // Create 24 hours of data (0-23)
+      for (let hour = 0; hour < 24; hour++) {
+        const found = results.find(r => r._id === hour);
+        const income = found ? roundAmount(found.income) : 0;
+        const expenses = found ? roundAmount(found.expenses) : 0;
+        const transfers = found ? roundAmount(found.transfers) : 0;
+
+        dataPoints.push({
+          hour,
+          income,
+          expenses,
+          transfers
+        });
+
+        totalIncome += income;
+        totalExpenses += expenses;
+        totalTransfers += transfers;
+      }
+    } else if (period === 'week') {
+      // Create 7 days of week data
+      for (let dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek++) {
+        const found = results.find(r => r._id === dayOfWeek);
+        const income = found ? roundAmount(found.income) : 0;
+        const expenses = found ? roundAmount(found.expenses) : 0;
+        const transfers = found ? roundAmount(found.transfers) : 0;
+
+        dataPoints.push({
+          day: dayNames[dayOfWeek === 1 ? 0 : dayOfWeek - 1], // MongoDB $dayOfWeek: Sunday=1, Monday=2, etc
+          income,
+          expenses,
+          transfers
+        });
+
+        totalIncome += income;
+        totalExpenses += expenses;
+        totalTransfers += transfers;
+      }
+    } else if (period === 'month') {
+      // Get days in current month
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const monthAbbr = getMonthAbbreviation(now.getMonth());
+
+      for (let date = 1; date <= daysInMonth; date++) {
+        const found = results.find(r => r._id === date);
+        const income = found ? roundAmount(found.income) : 0;
+        const expenses = found ? roundAmount(found.expenses) : 0;
+        const transfers = found ? roundAmount(found.transfers) : 0;
+
+        dataPoints.push({
+          date: `${monthAbbr}.${date}`,
+          income,
+          expenses,
+          transfers
+        });
+
+        totalIncome += income;
+        totalExpenses += expenses;
+        totalTransfers += transfers;
+      }
+    } else if (period === 'year') {
+      // period === 'year' - 12 months
+      for (let month = 1; month <= 12; month++) {
+        const found = results.find(r => r._id === month);
+        const income = found ? roundAmount(found.income) : 0;
+        const expenses = found ? roundAmount(found.expenses) : 0;
+        const transfers = found ? roundAmount(found.transfers) : 0;
+
+        dataPoints.push({
+          month: monthNames[month - 1],
+          income,
+          expenses,
+          transfers
+        });
+
+        totalIncome += income;
+        totalExpenses += expenses;
+        totalTransfers += transfers;
+      }
+    } else {
+      // period === 'all' - All years
+      // Sort results to get year range
+      const sortedResults = results.sort((a: any, b: any) => a._id - b._id);
+      const minYear = sortedResults.length > 0 ? sortedResults[0]._id : now.getFullYear();
+      const maxYear = sortedResults.length > 0 ? sortedResults[sortedResults.length - 1]._id : now.getFullYear();
+
+      // Create from minYear to current year
+      for (let year = minYear; year <= maxYear; year++) {
+        const found = results.find(r => r._id === year);
+        const income = found ? roundAmount(found.income) : 0;
+        const expenses = found ? roundAmount(found.expenses) : 0;
+        const transfers = found ? roundAmount(found.transfers) : 0;
+
+        dataPoints.push({
+          year,
+          income,
+          expenses,
+          transfers
+        });
+
+        totalIncome += income;
+        totalExpenses += expenses;
+        totalTransfers += transfers;
+      }
+
+      // Set date range for 'all'
+      dateRange = {
+        startDate: new Date(minYear, 0, 1),
+        endDate: new Date(maxYear, 11, 31, 23, 59, 59)
+      };
+    }
+
+    return {
+      error: false,
+      data: {
+        period,
+        startDate: dateRange.startDate.toISOString(),
+        endDate: dateRange.endDate.toISOString(),
+        dataPoints,
+        totals: {
+          income: roundAmount(totalIncome),
+          expenses: roundAmount(totalExpenses),
+          transfers: roundAmount(totalTransfers)
+        }
+      }
+    };
+  } catch (err) {
+    console.log(`Error getting chart data: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to retrieve chart data.',
       statusCode: 400
     };
   }

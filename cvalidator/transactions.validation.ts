@@ -97,3 +97,8 @@ export const analyticsQuerySchema = z.object({
 export const topCategoryTodayQuerySchema = z.object({
   walletId: z.string().regex(/^[0-9a-f]{24}$/i).optional()
 });
+
+export const chartDataQuerySchema = z.object({
+  period: z.enum(['today', 'day', 'week', 'month', 'year', 'all']).default('month'),
+  walletId: z.string().regex(/^[0-9a-f]{24}$/i).optional()
+});

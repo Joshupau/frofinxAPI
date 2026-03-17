@@ -136,6 +136,46 @@ export interface SpentTodayResponse {
   statusCode?: number;
 }
 
+// Chart data types for grouped transactions by time period
+
+export interface ChartDataQuery {
+  period: 'day' | 'week' | 'month' | 'year';
+  walletId?: string;
+}
+
+export interface ChartDataPoint {
+  // For 'day': hour (0-23)
+  hour?: number;
+  // For 'week': day name ('Monday', 'Tuesday', etc)
+  day?: string;
+  // For 'month': date (1-31)
+  date?: number;
+  // For 'year': month name ('January', 'February', etc)
+  month?: string;
+  // Transaction data
+  income: number;
+  expenses: number;
+  transfers: number;
+  total?: number; // income + expenses + transfers (with sign consideration)
+}
+
+export interface ChartDataResponse {
+  error: boolean;
+  message?: string;
+  data?: {
+    period: string;
+    startDate: string;
+    endDate: string;
+    dataPoints: ChartDataPoint[];
+    totals: {
+      income: number;
+      expenses: number;
+      transfers: number;
+    };
+  };
+  statusCode?: number;
+}
+
 export interface AnalyticsQuery {
   period: 'daily' | 'weekly' | 'yearly';
   walletId?: string;

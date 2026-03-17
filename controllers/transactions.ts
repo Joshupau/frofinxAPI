@@ -358,3 +358,32 @@ export const getTopCategoryToday = async (req: Request, res: Response, next: Nex
     next(err);
   }
 };
+
+export const getChartData = async (req: Request, res: Response, next: NextFunction) => {
+  const { period = 'month', walletId } = req.validatedQuery as any;
+  const { id } = req.user!;
+  try {
+    const validPeriods = ['today', 'week', 'month', 'year', 'all'];
+    if (period && !validPeriods.includes(period)) {
+      return res.status(400).json({
+        message: 'failed',
+        data: `Invalid period. Must be one of: ${validPeriods.join(', ')}`
+      });
+    }
+
+    const result = await transactionService.getChartData(
+      id,
+      (period || 'month') as 'today' | 'week' | 'month' | 'year' | 'all',
+      walletId
+    );
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
