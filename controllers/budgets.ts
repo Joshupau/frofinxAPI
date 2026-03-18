@@ -3,7 +3,11 @@ import type {
   BudgetCreateBody,
   BudgetUpdateBody,
   BudgetListQuery,
-  BudgetCurrentQuery
+  BudgetCurrentQuery,
+  BudgetRolloverBody,
+  BudgetPerformanceResponse,
+  BudgetRolloverResponse,
+  BudgetSuggestionsResponse
 } from '../ctypes/budgets.types.js';
 import * as budgetService from '../cservice/budgets.service.js';
 
@@ -144,6 +148,58 @@ export const getSummary = async (req: Request, res: Response, next: NextFunction
 
   try {
     const result = await budgetService.getSummary(id);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getPerformance = async (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.user!;
+
+  try {
+    const result = await budgetService.getPerformance(id);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const rolloverBudget = async (req: Request, res: Response, next: NextFunction) => {
+  const { id: budgetId } = req.validatedBody as BudgetRolloverBody;
+  const { id: userId } = req.user!;
+
+  try {
+    const result = await budgetService.rolloverBudget(userId, budgetId);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getSuggestions = async (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.user!;
+
+  try {
+    const result = await budgetService.getSuggestions(id);
 
     if (result.error) {
       const statusCode = result.statusCode || 400;

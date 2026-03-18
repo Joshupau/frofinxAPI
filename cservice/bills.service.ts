@@ -4,6 +4,55 @@ import Transactions from '../models/Transactions.js';
 import Wallets from '../models/Wallets.js';
 import type { BillServiceResponse } from '../ctypes/bills.types.js';
 import { pageOptions } from '../utils/paginate.js';
+import { getDateRange, getDateFilter } from '../utils/dateFilters.utils.js';
+
+/**
+ * Helper: Calculate next due date based on recurring frequency
+ */
+const calculateNextDueDate = (currentDate: Date, frequency: string): Date => {
+  const nextDate = new Date(currentDate);
+  
+  switch (frequency) {
+    case 'daily':
+      nextDate.setDate(nextDate.getDate() + 1);
+      break;
+    case 'weekly':
+      nextDate.setDate(nextDate.getDate() + 7);
+      break;
+    case 'monthly':
+      nextDate.setMonth(nextDate.getMonth() + 1);
+      break;
+    case 'yearly':
+      nextDate.setFullYear(nextDate.getFullYear() + 1);
+      break;
+  }
+  
+  return nextDate;
+};
+
+/**
+ * Helper: Check if idempotency key was already processed in last 24 hours
+ */
+const checkIdempotency = async (
+  userId: string,
+  idempotencyKey: string,
+  session?: mongoose.ClientSession
+): Promise<mongoose.Document | null> => {
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  
+  const result = await Transactions.findOne(
+    {
+      owner: new mongoose.Types.ObjectId(userId),
+      idempotencyKey: idempotencyKey,
+      createdAt: { $gte: oneDayAgo },
+      status: 'completed'
+    },
+    null,
+    { session }
+  );
+  
+  return result;
+};
 
 export const create = async (
   userId: string,
@@ -18,8 +67,12 @@ export const create = async (
   reminderDays?: number,
   notes?: string
 ): Promise<BillServiceResponse> => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     if (isRecurring && !recurringFrequency) {
+      await session.abortTransaction();
       return {
         error: true,
         message: 'Recurring frequency required for recurring bills.',
@@ -27,53 +80,72 @@ export const create = async (
       };
     }
 
-    const bill = await Bills.create({
-      owner: new mongoose.Types.ObjectId(userId),
-      name: name,
-      amount: amount,
-      category: categoryId ? new mongoose.Types.ObjectId(categoryId) : undefined,
-      dueDate: new Date(dueDate),
-      isRecurring: isRecurring,
-      recurringFrequency: recurringFrequency,
-      wallet: walletId ? new mongoose.Types.ObjectId(walletId) : undefined,
-      reminder: reminder !== undefined ? reminder : true,
-      reminderDays: reminderDays || 3,
-      notes: notes,
-      paymentStatus: 'unpaid',
-      status: 'active'
-    });
+    const bill = await Bills.create(
+      [
+        {
+          owner: new mongoose.Types.ObjectId(userId),
+          name: name,
+          amount: amount,
+          category: categoryId ? new mongoose.Types.ObjectId(categoryId) : undefined,
+          dueDate: new Date(dueDate),
+          isRecurring: isRecurring,
+          recurringFrequency: recurringFrequency,
+          wallet: walletId ? new mongoose.Types.ObjectId(walletId) : undefined,
+          reminder: reminder !== undefined ? reminder : true,
+          reminderDays: reminderDays || 3,
+          notes: notes,
+          paymentStatus: 'unpaid',
+          status: 'active'
+        }
+      ],
+      { session }
+    );
 
     // Auto-create a pending transaction representing this unpaid bill
     if (walletId) {
-      const pendingTransaction = await Transactions.create({
-        owner: new mongoose.Types.ObjectId(userId),
-        wallet: new mongoose.Types.ObjectId(walletId),
-        category: categoryId ? new mongoose.Types.ObjectId(categoryId) : undefined,
-        amount: amount,
-        type: 'expense',
-        description: `Bill: ${name}`,
-        date: new Date(dueDate),
-        attachments: [],
-        tags: [],
-        bill: bill._id,
-        status: 'pending'
-      });
+      const pendingTransaction = await Transactions.create(
+        [
+          {
+            owner: new mongoose.Types.ObjectId(userId),
+            wallet: new mongoose.Types.ObjectId(walletId),
+            category: categoryId ? new mongoose.Types.ObjectId(categoryId) : undefined,
+            amount: amount,
+            type: 'expense',
+            description: `Bill: ${name}`,
+            date: new Date(dueDate),
+            attachments: [],
+            tags: [],
+            bill: bill[0]._id,
+            status: 'pending'
+          }
+        ],
+        { session }
+      );
 
-      await Bills.findByIdAndUpdate(bill._id, { transaction: pendingTransaction._id });
+      await Bills.findByIdAndUpdate(
+        bill[0]._id,
+        { transaction: pendingTransaction[0]._id },
+        { session }
+      );
     }
+
+    await session.commitTransaction();
 
     return {
       error: false,
       message: 'Bill created successfully',
-      data: { id: bill._id, ...bill.toObject() }
+      data: { id: bill[0]._id, ...bill[0].toObject() }
     };
   } catch (err) {
+    await session.abortTransaction();
     console.log(`Error creating bill: ${err}`);
     return {
       error: true,
       message: 'Failed to create bill. Please contact support.',
       statusCode: 400
     };
+  } finally {
+    await session.endSession();
   }
 };
 
@@ -218,15 +290,40 @@ export const markPaid = async (
   userId: string,
   id: string,
   paidAmount?: number,
-  paidDate?: string
+  paidDate?: string,
+  idempotencyKey?: string
 ): Promise<BillServiceResponse> => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const bill = await Bills.findOne({
-      _id: new mongoose.Types.ObjectId(id),
-      owner: new mongoose.Types.ObjectId(userId)
-    });
+    // 4. Idempotency Check: Prevent double-click charges
+    if (idempotencyKey) {
+      const existingTransaction = await checkIdempotency(userId, idempotencyKey, session);
+      if (existingTransaction) {
+        await session.abortTransaction();
+        return {
+          error: false,
+          message: 'Bill marked as paid successfully (cached)',
+          data: {
+            id: id,
+            message: 'Duplicate payment request detected. Original payment processed.'
+          }
+        };
+      }
+    }
+
+    const bill = await Bills.findOne(
+      {
+        _id: new mongoose.Types.ObjectId(id),
+        owner: new mongoose.Types.ObjectId(userId)
+      },
+      null,
+      { session }
+    );
 
     if (!bill) {
+      await session.abortTransaction();
       return {
         error: true,
         message: 'Bill not found or you do not have permission.',
@@ -236,6 +333,36 @@ export const markPaid = async (
 
     const amountPaid = paidAmount || bill.amount;
     const paymentDate = paidDate ? new Date(paidDate) : new Date();
+
+    // 3. Atomic Balance Update: Use $inc operator to prevent race conditions
+    let walletUpdateResult = null;
+    if (bill.wallet) {
+      walletUpdateResult = await Wallets.findByIdAndUpdate(
+        bill.wallet,
+        {
+          $inc: { balance: -amountPaid } // Atomic operation - prevents lost updates
+        },
+        { new: true, session }
+      );
+
+      if (!walletUpdateResult) {
+        await session.abortTransaction();
+        return {
+          error: true,
+          message: 'Linked wallet not found or inactive.',
+          statusCode: 404
+        };
+      }
+
+      if (walletUpdateResult.balance < 0) {
+        await session.abortTransaction();
+        return {
+          error: true,
+          message: 'Insufficient wallet balance to pay this bill.',
+          statusCode: 400
+        };
+      }
+    }
 
     const updateData: any = {
       paidAmount: amountPaid,
@@ -248,82 +375,106 @@ export const markPaid = async (
       updateData.paymentStatus = 'partial';
     }
 
-    // Complete the linked pending transaction and deduct from wallet
-    if (bill.transaction && bill.wallet) {
-      const wallet = await Wallets.findOne({
-        _id: bill.wallet,
-        owner: new mongoose.Types.ObjectId(userId),
-        status: 'active'
-      });
-
-      if (!wallet) {
-        return {
-          error: true,
-          message: 'Linked wallet not found or inactive.',
-          statusCode: 404
-        };
-      }
-
-      if (wallet.balance < amountPaid) {
-        return {
-          error: true,
-          message: 'Insufficient wallet balance to pay this bill.',
-          statusCode: 400
-        };
-      }
-
-      wallet.balance -= amountPaid;
-      await Promise.all([
-        wallet.save(),
-        Transactions.findByIdAndUpdate(bill.transaction, {
+    // Update the linked transaction to completed
+    if (bill.transaction) {
+      await Transactions.findByIdAndUpdate(
+        bill.transaction,
+        {
           status: 'completed',
           amount: amountPaid,
-          date: paymentDate
-        })
-      ]);
+          date: paymentDate,
+          ...(idempotencyKey && { idempotencyKey: idempotencyKey })
+        },
+        { session }
+      );
     }
 
-    // If recurring, calculate next due date
+    // 2. Non-Destructive Recurring Logic: Create new bill instead of overwriting
+    let nextDueDate = null;
     if (bill.isRecurring && bill.recurringFrequency) {
-      const nextDue = new Date(bill.dueDate);
-      
-      switch (bill.recurringFrequency) {
-        case 'daily':
-          nextDue.setDate(nextDue.getDate() + 1);
-          break;
-        case 'weekly':
-          nextDue.setDate(nextDue.getDate() + 7);
-          break;
-        case 'monthly':
-          nextDue.setMonth(nextDue.getMonth() + 1);
-          break;
-        case 'yearly':
-          nextDue.setFullYear(nextDue.getFullYear() + 1);
-          break;
-      }
+      nextDueDate = calculateNextDueDate(bill.dueDate, bill.recurringFrequency);
 
-      updateData.nextDueDate = nextDue;
-      updateData.dueDate = nextDue;
-      updateData.paymentStatus = 'unpaid'; // Reset for next period
+      // Create a NEW bill document for the next occurrence
+      const nextBill = await Bills.create(
+        [
+          {
+            owner: bill.owner,
+            name: bill.name,
+            amount: bill.amount,
+            category: bill.category,
+            dueDate: nextDueDate,
+            isRecurring: bill.isRecurring,
+            recurringFrequency: bill.recurringFrequency,
+            wallet: bill.wallet,
+            reminder: bill.reminder,
+            reminderDays: bill.reminderDays,
+            notes: bill.notes,
+            paymentStatus: 'unpaid',
+            status: 'active',
+            parentBillId: bill.parentBillId || bill._id // Track recurring series
+          }
+        ],
+        { session }
+      );
+
+      // Create a pending transaction for the next bill
+      if (bill.wallet) {
+        const nextPendingTransaction = await Transactions.create(
+          [
+            {
+              owner: bill.owner,
+              wallet: bill.wallet,
+              category: bill.category,
+              amount: bill.amount,
+              type: 'expense',
+              description: `Bill: ${bill.name}`,
+              date: nextDueDate,
+              attachments: [],
+              tags: [],
+              bill: nextBill[0]._id,
+              status: 'pending'
+            }
+          ],
+          { session }
+        );
+
+        await Bills.findByIdAndUpdate(
+          nextBill[0]._id,
+          { transaction: nextPendingTransaction[0]._id },
+          { session }
+        );
+      }
     }
 
+    // Mark current bill as paid (final update)
     await Bills.findByIdAndUpdate(
       new mongoose.Types.ObjectId(id),
-      { $set: updateData }
+      { $set: updateData },
+      { session }
     );
+
+    await session.commitTransaction();
 
     return {
       error: false,
       message: 'Bill marked as paid successfully',
-      data: { nextDueDate: updateData.nextDueDate }
+      data: {
+        billId: id,
+        amountPaid: amountPaid,
+        nextDueDate: nextDueDate,
+        isRecurring: bill.isRecurring
+      }
     };
   } catch (err) {
+    await session.abortTransaction();
     console.log(`Error marking bill as paid: ${err}`);
     return {
       error: true,
       message: 'Failed to mark bill as paid.',
       statusCode: 400
     };
+  } finally {
+    await session.endSession();
   }
 };
 
@@ -446,54 +597,120 @@ export const getOverdue = async (userId: string): Promise<BillServiceResponse> =
 
 export const getSummary = async (userId: string): Promise<BillServiceResponse> => {
   try {
-    const [total, paid, unpaid, overdue, recurring, totalAmount] = await Promise.all([
-      Bills.countDocuments({ owner: new mongoose.Types.ObjectId(userId), status: 'active' }),
-      Bills.countDocuments({
-        owner: new mongoose.Types.ObjectId(userId),
-        status: 'active',
-        paymentStatus: 'paid'
-      }),
-      Bills.countDocuments({
-        owner: new mongoose.Types.ObjectId(userId),
-        status: 'active',
-        paymentStatus: 'unpaid'
-      }),
-      Bills.countDocuments({
-        owner: new mongoose.Types.ObjectId(userId),
-        status: 'active',
-        paymentStatus: 'overdue'
-      }),
-      Bills.countDocuments({
-        owner: new mongoose.Types.ObjectId(userId),
-        status: 'active',
-        isRecurring: true
-      }),
-      Bills.aggregate([
-        {
-          $match: {
-            owner: new mongoose.Types.ObjectId(userId),
-            status: 'active',
-            paymentStatus: { $in: ['unpaid', 'overdue', 'partial'] }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            total: { $sum: '$amount' }
-          }
+    // 5. Summary Aggregation: Single pipeline with $facet for better performance
+    const aggregationResult = await Bills.aggregate([
+      {
+        $match: {
+          owner: new mongoose.Types.ObjectId(userId),
+          status: 'active'
         }
-      ])
+      },
+      {
+        $facet: {
+          // Count different bill statuses
+          billCounts: [
+            {
+              $group: {
+                _id: null,
+                totalBills: { $sum: 1 },
+                paidBills: {
+                  $sum: { $cond: [{ $eq: ['$paymentStatus', 'paid'] }, 1, 0] }
+                },
+                unpaidBills: {
+                  $sum: { $cond: [{ $eq: ['$paymentStatus', 'unpaid'] }, 1, 0] }
+                },
+                overdueBills: {
+                  $sum: { $cond: [{ $eq: ['$paymentStatus', 'overdue'] }, 1, 0] }
+                },
+                partialBills: {
+                  $sum: { $cond: [{ $eq: ['$paymentStatus', 'partial'] }, 1, 0] }
+                },
+                recurringBills: {
+                  $sum: { $cond: [{ $eq: ['$isRecurring', true] }, 1, 0] }
+                }
+              }
+            }
+          ],
+          // Calculate total amounts
+          amountDues: [
+            {
+              $match: {
+                paymentStatus: { $in: ['unpaid', 'overdue', 'partial'] }
+              }
+            },
+            {
+              $group: {
+                _id: null,
+                totalAmountDue: { $sum: '$amount' },
+                upcomingAmount: {
+                  $sum: {
+                    $cond: [
+                      { $gt: ['$dueDate', new Date()] },
+                      '$amount',
+                      0
+                    ]
+                  }
+                },
+                overdueAmount: {
+                  $sum: {
+                    $cond: [
+                      { $lt: ['$dueDate', new Date()] },
+                      '$amount',
+                      0
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
     ]);
+
+    const billStats = aggregationResult[0]?.billCounts[0] || {
+      totalBills: 0,
+      paidBills: 0,
+      unpaidBills: 0,
+      overdueBills: 0,
+      partialBills: 0,
+      recurringBills: 0
+    };
+
+    const amountStats = aggregationResult[0]?.amountDues[0] || {
+      totalAmountDue: 0,
+      upcomingAmount: 0,
+      overdueAmount: 0
+    };
+
+    // Get total wallet balance for disposable income calculation
+    const walletStats = await Wallets.aggregate([
+      {
+        $match: {
+          owner: new mongoose.Types.ObjectId(userId),
+          status: 'active'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalWalletBalance: { $sum: '$balance' }
+        }
+      }
+    ]);
+
+    const totalWalletBalance = walletStats[0]?.totalWalletBalance || 0;
+    const disposableIncome = totalWalletBalance - amountStats.totalAmountDue;
 
     return {
       error: false,
       data: {
-        totalBills: total,
-        paidBills: paid,
-        unpaidBills: unpaid,
-        overdueBills: overdue,
-        recurringBills: recurring,
-        totalAmountDue: totalAmount[0]?.total || 0
+        ...billStats,
+        ...amountStats,
+        totalWalletBalance,
+        disposableIncome,
+        summary: {
+          message: `You have ${billStats.unpaidBills + billStats.overdueBills} unpaid bills totaling ₱${amountStats.totalAmountDue.toFixed(2)}`
+        }
       }
     };
   } catch (err) {
@@ -501,6 +718,151 @@ export const getSummary = async (userId: string): Promise<BillServiceResponse> =
     return {
       error: true,
       message: 'Failed to retrieve bill summary.',
+      statusCode: 400
+    };
+  }
+};
+
+/**
+ * Calendar API: Get bills grouped by date for calendar visualization
+ * Supports both month/year and date range queries
+ */
+export const getCalendar = async (
+  userId: string,
+  month?: string,
+  year?: string,
+  startDate?: string,
+  endDate?: string
+): Promise<BillServiceResponse> => {
+  try {
+    let dateStart: Date;
+    let dateEnd: Date;
+
+    // Determine date range and build query filter
+    let filter: any = { owner: new mongoose.Types.ObjectId(userId), status: 'active' };
+
+    if (startDate && endDate) {
+      dateStart = new Date(startDate);
+      dateEnd = new Date(endDate);
+      // Ensure end date includes the entire last day
+      dateEnd.setHours(23, 59, 59, 999);
+      filter.dueDate = { $gte: dateStart, $lte: dateEnd };
+    } else if (month && year) {
+      // month is 1-indexed (1-12)
+      const monthNum = parseInt(month) - 1; // Convert to 0-indexed
+      const yearNum = parseInt(year);
+      dateStart = new Date(yearNum, monthNum, 1); // First day of month
+      dateEnd = new Date(yearNum, monthNum + 1, 0); // Last day of month
+      dateEnd.setHours(23, 59, 59, 999);
+      filter.dueDate = { $gte: dateStart, $lte: dateEnd };
+    } else {
+      // Default to current month using shared utilities
+      const range = getDateRange('month');
+      dateStart = range.startDate;
+      dateEnd = range.endDate;
+      // getDateFilter returns owner and a `date` range for transactions; adapt it for bills (dueDate)
+      const monthFilter = getDateFilter(userId, 'month') as any;
+      filter.owner = monthFilter.owner;
+      filter.status = monthFilter.status || 'active';
+      // monthFilter.date is { $gte, $lte }
+      filter.dueDate = monthFilter.date;
+    }
+
+    // Fetch all bills in date range with populated categories
+    const bills = await Bills.find(filter)
+      .populate('category', 'name color type')
+      .lean();
+
+    // Group bills by date and build calendar response
+    const calendarEvents: { [date: string]: any[] } = {};
+    const datesWithBills: Set<string> = new Set();
+    let stats = {
+      totalBillsInRange: 0,
+      unpaidCount: 0,
+      paidCount: 0,
+      overdueCount: 0,
+      totalAmountDue: 0,
+      totalAmountPaid: 0
+    };
+
+    bills.forEach((bill) => {
+      // Format date as YYYY-MM-DD
+      const billDate = bill.dueDate;
+      const dateKey = billDate.toISOString().split('T')[0];
+      datesWithBills.add(dateKey);
+
+      // Determine color based on status
+      let statusColor = '#FFE66D'; // Default: unpaid yellow
+      let statusLabel = bill.paymentStatus.charAt(0).toUpperCase() + bill.paymentStatus.slice(1);
+
+      if (bill.paymentStatus === 'unpaid') {
+        statusColor = '#FF6B6B'; // Red
+        stats.unpaidCount++;
+        stats.totalAmountDue += bill.amount || 0;
+      } else if (bill.paymentStatus === 'paid') {
+        statusColor = '#4ECDC4'; // Teal
+        stats.paidCount++;
+        stats.totalAmountPaid += bill.amount || 0;
+      } else if (bill.paymentStatus === 'overdue') {
+        statusColor = '#FF5252'; // Bright Red
+        stats.overdueCount++;
+        stats.totalAmountDue += bill.amount || 0;
+        statusLabel = 'Overdue';
+      } else if (bill.paymentStatus === 'partial') {
+        statusColor = '#95E1D3'; // Light Teal
+        stats.unpaidCount++;
+        const remaining = (bill.amount || 0) - (bill.paidAmount || 0);
+        stats.totalAmountDue += remaining;
+      }
+
+      stats.totalBillsInRange++;
+
+      const categoryData = bill.category as any;
+      const event = {
+        id: bill._id.toString(),
+        name: bill.name,
+        amount: bill.amount,
+        dueDate: dateKey,
+        paymentStatus: bill.paymentStatus,
+        isRecurring: bill.isRecurring,
+        recurringFrequency: bill.recurringFrequency,
+        categoryName: categoryData?.name,
+        categoryColor: categoryData?.color,
+        reminder: bill.reminder,
+        reminderDays: bill.reminderDays,
+        notes: bill.notes,
+        statusColor: statusColor,
+        statusLabel: statusLabel
+      };
+
+      if (!calendarEvents[dateKey]) {
+        calendarEvents[dateKey] = [];
+      }
+      calendarEvents[dateKey].push(event);
+    });
+
+    // Sort bills within each date by name
+    Object.keys(calendarEvents).forEach((date) => {
+      calendarEvents[date].sort((a, b) => a.name.localeCompare(b.name));
+    });
+
+    return {
+      error: false,
+      data: {
+        month: month,
+        year: year,
+        startDate: dateStart.toISOString().split('T')[0],
+        endDate: dateEnd.toISOString().split('T')[0],
+        calendarEvents: calendarEvents,
+        statistics: stats,
+        datesWithBills: Array.from(datesWithBills).sort()
+      }
+    };
+  } catch (err) {
+    console.log(`Error getting bill calendar: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to retrieve bill calendar.',
       statusCode: 400
     };
   }

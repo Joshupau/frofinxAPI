@@ -15,6 +15,7 @@ export interface ITransaction extends Document {
   toWallet?: mongoose.Types.ObjectId; // for transfer type
   serviceFee?: number; // service fee for transfers
   serviceFeeDeducted?: boolean; // whether the service fee was immediately deducted from the wallet
+  idempotencyKey?: string; // for idempotency (prevent duplicate payments)
   status: 'completed' | 'pending' | 'cancelled';
   createdAt?: Date;
   updatedAt?: Date;
@@ -35,6 +36,7 @@ const TransactionSchema = new Schema<ITransaction>(
     toWallet: { type: mongoose.Schema.Types.ObjectId, ref: 'Wallets' },
     serviceFee: { type: Number, default: 0 },
     serviceFeeDeducted: { type: Boolean, default: false },
+    idempotencyKey: { type: String, index: true, sparse: true },
     status: { type: String, required: true, default: 'completed', enum: ['completed', 'pending', 'cancelled'], index: true }
   },
   {
@@ -48,6 +50,7 @@ TransactionSchema.index({ owner: 1, date: -1 });
 TransactionSchema.index({ owner: 1, wallet: 1, status: 1 });
 TransactionSchema.index({ owner: 1, category: 1, date: -1 });
 TransactionSchema.index({ owner: 1, type: 1, date: -1 });
+TransactionSchema.index({ owner: 1, idempotencyKey: 1, createdAt: -1 }); // for idempotency check
 
 const Transactions: Model<ITransaction> = mongoose.models.Transactions || mongoose.model<ITransaction>('Transactions', TransactionSchema);
 export default Transactions;

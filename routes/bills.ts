@@ -6,7 +6,8 @@ import {
   markPaidSchema,
   markUnpaidSchema,
   listBillsQuerySchema,
-  upcomingBillsQuerySchema
+  upcomingBillsQuerySchema,
+  billCalendarQuerySchema
 } from '../cvalidator/bills.validation.js';
 import * as ctrl from '../controllers/bills.js';
 
@@ -19,6 +20,7 @@ router
   .post('/mark-paid', zodBody(markPaidSchema), ctrl.markPaid)
   .post('/mark-unpaid', zodBody(markUnpaidSchema), ctrl.markUnpaid)
   .get('/upcoming', zodQuery(upcomingBillsQuerySchema), ctrl.getUpcoming)
+  .get('/calendar', zodQuery(billCalendarQuerySchema), ctrl.getCalendar)
   .get('/overdue', ctrl.getOverdue)
   .get('/summary', ctrl.getSummary);
 

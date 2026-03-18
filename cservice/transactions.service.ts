@@ -878,7 +878,7 @@ export const getDashboardSummary = async (
       };
     }
 
-    const { startDate, endDate } = getMonthDateRange(targetMonth, targetYear);
+    // const { startDate, endDate } = getMonthDateRange(targetMonth, targetYear);
 
     const matchStage: any = {
       owner: new mongoose.Types.ObjectId(userId),

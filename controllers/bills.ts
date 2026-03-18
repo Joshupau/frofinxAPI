@@ -117,11 +117,11 @@ export const update = async (req: Request, res: Response, next: NextFunction) =>
 };
 
 export const markPaid = async (req: Request, res: Response, next: NextFunction) => {
-  const { id: billId, paidAmount, paidDate } = req.validatedBody as BillMarkPaidBody;
+  const { id: billId, paidAmount, paidDate, idempotencyKey } = req.validatedBody as BillMarkPaidBody & { idempotencyKey?: string };
   const { id: userId } = req.user!;
 
   try {
-    const result = await billService.markPaid(userId, billId, paidAmount, paidDate);
+    const result = await billService.markPaid(userId, billId, paidAmount, paidDate, idempotencyKey);
 
     if (result.error) {
       const statusCode = result.statusCode || 400;
@@ -192,6 +192,24 @@ export const getSummary = async (req: Request, res: Response, next: NextFunction
 
   try {
     const result = await billService.getSummary(id);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getCalendar = async (req: Request, res: Response, next: NextFunction) => {
+  const { month, year, startDate, endDate } = req.validatedQuery as any;
+  const { id } = req.user!;
+
+  try {
+    const result = await billService.getCalendar(id, month, year, startDate, endDate);
 
     if (result.error) {
       const statusCode = result.statusCode || 400;
