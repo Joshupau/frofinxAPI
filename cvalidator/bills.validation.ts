@@ -9,6 +9,7 @@ export const createBillSchema = z.object({
   isRecurring: booleanFromString,
   recurringFrequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']).optional(),
   walletId: optionalObjectId,
+  type: z.enum(['bill', 'income']).optional(),
   reminder: z.boolean().optional(),
   reminderDays: optionalNumber,
   notes: optionalString

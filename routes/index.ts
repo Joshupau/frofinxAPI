@@ -8,6 +8,8 @@ import walletsRouter from './wallets.js';
 import transactionsRouter from './transactions.js';
 import billsRouter from './bills.js';
 import budgetsRouter from './budgets.js';
+import obligationsRouter from './obligations.js';
+import investmentsRouter from './investments.js';
 import passport from 'passport';
 
 interface AppInterface {
@@ -30,6 +32,8 @@ const routers: Routers = (_app: AppInterface) => {
   _app.use('/transaction', passport.authenticate('jwt', { session: false }), transactionsRouter);
   _app.use('/bill', passport.authenticate('jwt', { session: false }), billsRouter);
   _app.use('/budget', passport.authenticate('jwt', { session: false }), budgetsRouter);
+  _app.use('/obligation', passport.authenticate('jwt', { session: false }), obligationsRouter);
+  _app.use('/investment', passport.authenticate('jwt', { session: false }), investmentsRouter);
 
 };
 

@@ -88,7 +88,7 @@ export const list = async (
 
     const [categories, totalDocuments] = await Promise.all([
       Categories.find(filter)
-        .sort({ isDefault: -1, name: 1 }) // Default categories first, then alphabetical
+        .sort({ name: 1 }) // Alphabetical
         .skip(options.skip)
         .limit(options.limit),
       Categories.countDocuments(filter)

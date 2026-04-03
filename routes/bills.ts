@@ -17,6 +17,7 @@ router
   .post('/create', zodBody(createBillSchema), ctrl.create)
   .get('/list', zodQuery(listBillsQuerySchema), ctrl.list)
   .post('/update', zodBody(updateBillSchema), ctrl.update)
+  .post('/delete', zodBody(updateBillSchema), ctrl.deleteBill)
   .post('/mark-paid', zodBody(markPaidSchema), ctrl.markPaid)
   .post('/mark-unpaid', zodBody(markUnpaidSchema), ctrl.markUnpaid)
   .get('/upcoming', zodQuery(upcomingBillsQuerySchema), ctrl.getUpcoming)

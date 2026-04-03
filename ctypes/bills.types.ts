@@ -9,6 +9,7 @@ export interface BillCreateBody {
   recurringFrequency?: 'daily' | 'weekly' | 'monthly' | 'yearly';
   walletId?: string;
   reminder?: boolean;
+  type: 'bill' | 'income';
   reminderDays?: number;
   notes?: string;
 }

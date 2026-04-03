@@ -15,6 +15,7 @@ export const create = async (req: Request, res: Response, next: NextFunction) =>
     categoryId,
     dueDate,
     isRecurring,
+    type,
     recurringFrequency,
     walletId,
     reminder,
@@ -30,6 +31,7 @@ export const create = async (req: Request, res: Response, next: NextFunction) =>
       amount,
       dueDate,
       isRecurring,
+      type,
       categoryId,
       recurringFrequency,
       walletId,
@@ -110,6 +112,22 @@ export const update = async (req: Request, res: Response, next: NextFunction) =>
       return res.status(statusCode).json({ message: 'failed', data: result.message });
     }
 
+    return res.status(200).json({ message: 'success', data: result.message });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteBill = async (req: Request, res: Response, next: NextFunction) => {
+  const { id: billId } = req.validatedBody as { id: string };
+  const { id: userId } = req.user!;
+
+  try {
+    const result = await billService.deleteBill(userId, billId);
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
     return res.status(200).json({ message: 'success', data: result.message });
   } catch (err) {
     next(err);

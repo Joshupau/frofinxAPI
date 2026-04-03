@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Bills from '../models/Bills.js';
 import Transactions from '../models/Transactions.js';
 import Wallets from '../models/Wallets.js';
+import Obligations from '../models/Obligations.js';
 import type { BillServiceResponse } from '../ctypes/bills.types.js';
 import { pageOptions } from '../utils/paginate.js';
 import { getDateRange, getDateFilter } from '../utils/dateFilters.utils.js';
@@ -60,6 +61,7 @@ export const create = async (
   amount: number,
   dueDate: string,
   isRecurring: boolean,
+  type: 'bill' | 'income',
   categoryId?: string,
   recurringFrequency?: 'daily' | 'weekly' | 'monthly' | 'yearly',
   walletId?: string,
@@ -89,6 +91,7 @@ export const create = async (
           category: categoryId ? new mongoose.Types.ObjectId(categoryId) : undefined,
           dueDate: new Date(dueDate),
           isRecurring: isRecurring,
+          type: type,
           recurringFrequency: recurringFrequency,
           wallet: walletId ? new mongoose.Types.ObjectId(walletId) : undefined,
           reminder: reminder !== undefined ? reminder : true,
@@ -286,6 +289,38 @@ export const update = async (
   }
 };
 
+export const deleteBill = async (userId: string, id: string): Promise<BillServiceResponse> => {
+  try {
+    const bill = await Bills.findOne({
+      _id: new mongoose.Types.ObjectId(id),
+      owner: new mongoose.Types.ObjectId(userId)
+    });
+
+    if (!bill) {
+      return {
+        error: true,
+        message: 'Bill not found or you do not have permission.',
+        statusCode: 404
+      };
+    }
+    await Bills.findByIdAndUpdate(
+      new mongoose.Types.ObjectId(id),
+      { status: 'archived' }
+    );
+    return {
+      error: false,
+      message: 'Bill deleted successfully'
+    };
+  } catch (err) {
+    console.log(`Error deleting bill: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to delete bill.',
+      statusCode: 400
+    };
+  }
+};
+
 export const markPaid = async (
   userId: string,
   id: string,
@@ -387,6 +422,33 @@ export const markPaid = async (
         },
         { session }
       );
+    }
+
+    // Back-update the linked obligation when an installment bill is paid via bill flow
+    if (bill.obligation) {
+      const obligation = await Obligations.findById(bill.obligation, null, { session });
+      if (obligation && obligation.status !== 'settled' && obligation.status !== 'archived') {
+        const newRemainingBalance = parseFloat(Math.max(0, obligation.remainingBalance - amountPaid).toFixed(2));
+        const newPaidInstallments = obligation.isInstallment ? obligation.paidInstallments + 1 : obligation.paidInstallments;
+        const newStatus =
+          newRemainingBalance <= 0
+            ? 'settled'
+            : newPaidInstallments > 0
+              ? 'partially_paid'
+              : 'active';
+
+        await Obligations.findByIdAndUpdate(
+          obligation._id,
+          {
+            $set: {
+              remainingBalance: newRemainingBalance,
+              paidInstallments: newPaidInstallments,
+              status: newStatus
+            }
+          },
+          { session }
+        );
+      }
     }
 
     // 2. Non-Destructive Recurring Logic: Create new bill instead of overwriting

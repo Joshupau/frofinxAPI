@@ -3,13 +3,14 @@ import mongoose, { Document, Model, Schema } from 'mongoose';
 export interface IBill extends Document {
   _id: mongoose.Types.ObjectId;
   owner: mongoose.Types.ObjectId;
+  type: 'bill' | 'income';
   name: string;
   amount: number;
   category?: mongoose.Types.ObjectId;
   dueDate: Date;
   isRecurring: boolean;
   recurringFrequency?: 'daily' | 'weekly' | 'monthly' | 'yearly';
-  paymentStatus: 'paid' | 'unpaid' | 'overdue' | 'partial';
+  paymentStatus: 'paid' | 'unpaid' | 'overdue' | 'partial' | 'received';
   paidAmount?: number;
   wallet?: mongoose.Types.ObjectId;
   reminder: boolean;
@@ -20,6 +21,7 @@ export interface IBill extends Document {
   nextDueDate?: Date; // for recurring bills
   parentBillId?: mongoose.Types.ObjectId; // for recurring bills, reference to the original recurring bill
   transaction?: mongoose.Types.ObjectId; // linked pending transaction
+  obligation?: mongoose.Types.ObjectId; // linked obligation (for installment bills)
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -27,13 +29,14 @@ export interface IBill extends Document {
 const BillSchema = new Schema<IBill>(
   {
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'Users', required: true, index: true },
+    type: { type: String, required: true, default: 'bill', enum: ['bill', 'income'], index: true },
     name: { type: String, required: true, index: true },
     amount: { type: Number, required: true },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Categories', index: true },
     dueDate: { type: Date, required: true, index: true },
     isRecurring: { type: Boolean, required: true, default: false, index: true },
     recurringFrequency: { type: String, enum: ['daily', 'weekly', 'monthly', 'yearly'] },
-    paymentStatus: { type: String, required: true, default: 'unpaid', enum: ['paid', 'unpaid', 'overdue', 'partial'], index: true },
+    paymentStatus: { type: String, required: true, default: 'unpaid', enum: ['paid', 'unpaid', 'overdue', 'partial', 'received'], index: true },
     paidAmount: { type: Number, default: 0 },
     wallet: { type: mongoose.Schema.Types.ObjectId, ref: 'Wallets', index: true },
     reminder: { type: Boolean, default: true },
@@ -43,7 +46,8 @@ const BillSchema = new Schema<IBill>(
     lastPaidDate: { type: Date },
     nextDueDate: { type: Date },
     parentBillId: { type: mongoose.Schema.Types.ObjectId, ref: 'Bills', index: true },
-    transaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transactions' }
+    transaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transactions' },
+    obligation: { type: mongoose.Schema.Types.ObjectId, ref: 'Obligations', index: true }
   },
   {
     timestamps: true,
@@ -52,9 +56,9 @@ const BillSchema = new Schema<IBill>(
 );
 
 // Compound indexes for common queries
-BillSchema.index({ owner: 1, dueDate: 1, paymentStatus: 1 });
-BillSchema.index({ owner: 1, isRecurring: 1, status: 1 });
-BillSchema.index({ owner: 1, status: 1, paymentStatus: 1 });
+BillSchema.index({ owner: 1, type: 1, dueDate: 1, paymentStatus: 1 });
+BillSchema.index({ owner: 1, type: 1, isRecurring: 1, status: 1 });
+BillSchema.index({ owner: 1, type: 1, status: 1, paymentStatus: 1 });
 
 const Bills: Model<IBill> = mongoose.models.Bills || mongoose.model<IBill>('Bills', BillSchema);
 export default Bills;
