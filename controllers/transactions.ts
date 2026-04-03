@@ -173,11 +173,11 @@ export const getMonthlyReport = async (req: Request, res: Response, next: NextFu
 };
 
 export const getCategoryBreakdown = async (req: Request, res: Response, next: NextFunction) => {
-  const { type, startDate, endDate, walletId } = req.validatedQuery as any;
+  const { type, startDate, endDate, walletId, period } = req.validatedQuery as any;
   const { id } = req.user!;
 
   try {
-    const result = await transactionService.getCategoryBreakdown(id, type, startDate, endDate, walletId);
+    const result = await transactionService.getCategoryBreakdown(id, type, startDate, endDate, walletId, period);
 
     if (result.error) {
       const statusCode = result.statusCode || 400;

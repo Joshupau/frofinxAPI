@@ -492,7 +492,8 @@ export const getCategoryBreakdown = async (
   type: 'income' | 'expense',
   startDate?: string,
   endDate?: string,
-  walletId?: string
+  walletId?: string,
+  period?: 'today' | 'week' | 'month' | 'year' | 'all'
 ): Promise<TransactionServiceResponse> => {
   try {
     const matchStage: any = {
@@ -501,7 +502,17 @@ export const getCategoryBreakdown = async (
       status: 'completed'
     };
 
-    if (startDate || endDate) {
+    if (period) {
+      if (period === 'all') {
+        const now = new Date();
+        const start = new Date(2000, 0, 1);
+        matchStage.date = { $gte: start, $lte: now };
+      } else {
+        const p = period === 'today' ? 'day' : period;
+        const daterange = getDateRange(p as 'day' | 'week' | 'month' | 'year');
+        matchStage.date = { $gte: daterange.startDate, $lte: daterange.endDate };
+      }
+    } else if (startDate || endDate) {
       matchStage.date = {};
       if (startDate) matchStage.date.$gte = new Date(startDate);
       if (endDate) matchStage.date.$lte = new Date(endDate);

@@ -65,9 +65,10 @@ export const monthlyReportQuerySchema = z.object({
 
 export const categoryBreakdownQuerySchema = z.object({
   type: z.enum(['income', 'expense']),
-  startDate: z.string().datetime().optional().or(z.literal('')),
-  endDate: z.string().datetime().optional().or(z.literal('')),
-  walletId: optionalObjectId
+  startDate: dateOrDateTime.optional().or(z.literal('')),
+  endDate: dateOrDateTime.optional().or(z.literal('')),
+  walletId: optionalObjectId,
+  period: z.enum(['today', 'week', 'month', 'year', 'all']).optional()
 });
 
 
