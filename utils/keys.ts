@@ -14,6 +14,10 @@ export const getPrivateKey = (): string => {
   if (cachedPrivateKey) return cachedPrivateKey;
 
   const fromEnv = process.env.JWT_PRIVATE_KEY;
+  // TEMP DIAGNOSTIC — remove once JWT_PRIVATE_KEY resolution is confirmed working in prod.
+  console.log(
+    `[getPrivateKey] JWT_PRIVATE_KEY present: ${!!fromEnv}, length: ${fromEnv?.length ?? 0}, starts: ${JSON.stringify(fromEnv?.slice(0, 15))}`
+  );
   if (fromEnv) {
     cachedPrivateKey = fromEnv.includes('\\n') ? fromEnv.replace(/\\n/g, '\n') : fromEnv;
     return cachedPrivateKey;
