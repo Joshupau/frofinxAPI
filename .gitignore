@@ -137,3 +137,5 @@ settings.json
 
 # scripts
 scripts
+.vercel
+.env*

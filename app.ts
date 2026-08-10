@@ -57,5 +57,12 @@ app.use(morgan('dev'));
 routers(app);
 
 app.use(globalErrorHandler);
-const port = process.env.PORT || 5009; // Dynamic port for deployment
-server.listen(port, () => console.log(`Server is running on port: ${port}`));
+
+// On Vercel, requests come in through the serverless handler in api/index.ts
+// instead of a bound port — only listen when actually running our own server.
+if (!process.env.VERCEL) {
+  const port = process.env.PORT || 5009; // Dynamic port for deployment
+  server.listen(port, () => console.log(`Server is running on port: ${port}`));
+}
+
+export default app;

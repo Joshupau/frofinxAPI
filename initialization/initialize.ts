@@ -39,13 +39,13 @@ export const initialize = async () => {
     })
 
     if (users.length <= 0) {
-        const user = await Users.create({ _id: new mongoose.Types.ObjectId(process.env.ADMIN_ID), username: "Frofinx", password: "SND9KLAS011SA", webtoken: "", status: "active", auth: "user"})
+        const user = await Users.create({ _id: new mongoose.Types.ObjectId(process.env.ADMIN_ID), username: "Fico", password: "SND9KLAS011SA", webtoken: "", status: "active", auth: "user"})
         try { 
             if(!user || !user._id) {
                 console.log("User creation failed during initialization.");
                 return;
             }
-            await Userdetails.create({ owner: new mongoose.Types.ObjectId(user._id.toString()), firstname: "Frofinx", lastname: "User", address: "", contactnumber: "", email: "", country: "", city: "", postalcode: "", paymentmethod: "", accountnumber: "", profilepicture: "" });
+            await Userdetails.create({ owner: new mongoose.Types.ObjectId(user._id.toString()), firstname: "Fico", lastname: "User", address: "", contactnumber: "", email: "", country: "", city: "", postalcode: "", paymentmethod: "", accountnumber: "", profilepicture: "" });
         } catch (err) {
             console.log(`There's a problem creating user details for init. Error ${err}`)
             await Users.deleteOne({ _id: new mongoose.Types.ObjectId(process.env.ADMIN_ID) });
