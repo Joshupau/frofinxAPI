@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import Users from '../models/Users.js';
 import Staffusers from '../models/Staffusers.js';
@@ -10,11 +7,9 @@ import { encrypt } from '../utils/password.js';
 import { Globalpassusage, GlobalPassword } from '../models/Globalpass.js';
 import { checkmaintenance } from '../utils/maintenancetools.js';
 import jsonwebtokenPromisified from 'jsonwebtoken-promisified';
+import { getPrivateKey } from '../utils/keys.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const privateKey = fs.readFileSync(path.resolve(__dirname, '../keys/private-key.pem'), 'utf-8');
+const privateKey = getPrivateKey();
 
 
 export const login = async (username: string, password: string, ipAddress: string): Promise<AuthServiceResponse> => {

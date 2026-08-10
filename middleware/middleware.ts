@@ -1,16 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 
-import fs from 'fs';
-import path from "path";
-import { fileURLToPath } from 'url';
 import Staffusers from '../models/Staffusers.js';
 import Users from '../models/Users.js';
 import jsonwebtokenPromisified from 'jsonwebtoken-promisified';
 import passport from '../config/passport.js';
 import { encrypt } from '../utils/password.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getPrivateKey } from '../utils/keys.js';
 
 
 
@@ -35,7 +30,7 @@ export const localAuthenticate = (req: Request, res: Response, next: NextFunctio
             }
 
             try {
-                const privateKey = fs.readFileSync(path.resolve(__dirname, '../keys/private-key.pem'), 'utf-8');
+                const privateKey = getPrivateKey();
                 const token = await encrypt(privateKey);
                 
                 // Update user webtoken
