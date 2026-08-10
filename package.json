@@ -8,6 +8,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon --exec tsx app.ts",
     "build": "esbuild app.ts --bundle --platform=node --format=esm --outfile=dist/app.js --packages=external --loader:.html=text",
+    "start": "node dist/app.js",
     "lint": "eslint . --ext .js,.ts",
     "lint:ci": "eslint . --ext .js,.ts --max-warnings=0",
     "lint:fix": "eslint . --ext .js,.ts --fix"
