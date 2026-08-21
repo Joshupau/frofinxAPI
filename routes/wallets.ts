@@ -4,6 +4,7 @@ import {
   createWalletSchema,
   updateWalletSchema,
   adjustBalanceSchema,
+  setBalanceSchema,
   archiveWalletSchema,
   listWalletsQuerySchema,
   getWalletQuerySchema
@@ -18,6 +19,7 @@ router
   .get('/get', zodQuery(getWalletQuerySchema), ctrl.getById)
   .post('/update', zodBody(updateWalletSchema), ctrl.update)
   .post('/adjust-balance', zodBody(adjustBalanceSchema), ctrl.adjustBalance)
+  .post('/set-balance', zodBody(setBalanceSchema), ctrl.setBalance)
   .post('/archive', zodBody(archiveWalletSchema), ctrl.archive)
   .get('/total-balance', zodQuery(listWalletsQuerySchema), ctrl.getTotalBalance);
 

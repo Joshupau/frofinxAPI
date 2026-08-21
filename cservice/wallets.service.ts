@@ -214,6 +214,44 @@ export const adjustBalance = async (
   }
 };
 
+export const setBalance = async (
+  userId: string,
+  walletId: string,
+  balance: number
+): Promise<WalletServiceResponse> => {
+  try {
+    const wallet = await Wallets.findOne({
+      _id: new mongoose.Types.ObjectId(walletId),
+      owner: new mongoose.Types.ObjectId(userId),
+      status: 'active'
+    });
+
+    if (!wallet) {
+      return {
+        error: true,
+        message: 'Wallet not found or inactive.',
+        statusCode: 404
+      };
+    }
+
+    wallet.balance = balance;
+    await wallet.save();
+
+    return {
+      error: false,
+      message: 'Wallet balance overridden',
+      data: { newBalance: wallet.balance }
+    };
+  } catch (err) {
+    console.log(`Error overriding wallet balance: ${err}`);
+    return {
+      error: true,
+      message: 'Failed to override wallet balance.',
+      statusCode: 400
+    };
+  }
+};
+
 export const archive = async (userId: string, id: string): Promise<WalletServiceResponse> => {
   try {
     const wallet = await Wallets.findOne({

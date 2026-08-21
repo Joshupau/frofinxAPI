@@ -28,6 +28,11 @@ export interface WalletAdjustBalanceBody {
   description?: string;
 }
 
+export interface WalletSetBalanceBody {
+  id: string;
+  balance: number;
+}
+
 export interface WalletListQuery {
   page?: string;
   limit?: string;

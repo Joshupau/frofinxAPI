@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import type { WalletCreateBody, WalletUpdateBody, WalletAdjustBalanceBody, WalletListQuery } from '../ctypes/wallets.types.js';
+import type { WalletCreateBody, WalletUpdateBody, WalletAdjustBalanceBody, WalletSetBalanceBody, WalletListQuery } from '../ctypes/wallets.types.js';
 import * as walletService from '../cservice/wallets.service.js';
 
 export const create = async (req: Request, res: Response, next: NextFunction) => {
@@ -88,6 +88,24 @@ export const adjustBalance = async (req: Request, res: Response, next: NextFunct
 
   try {
     const result = await walletService.adjustBalance(userId, walletId, amount);
+
+    if (result.error) {
+      const statusCode = result.statusCode || 400;
+      return res.status(statusCode).json({ message: 'failed', data: result.message });
+    }
+
+    return res.status(200).json({ message: 'success', data: result.data });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const setBalance = async (req: Request, res: Response, next: NextFunction) => {
+  const { id: walletId, balance } = req.validatedBody as WalletSetBalanceBody;
+  const { id: userId } = req.user!;
+
+  try {
+    const result = await walletService.setBalance(userId, walletId, balance);
 
     if (result.error) {
       const statusCode = result.statusCode || 400;

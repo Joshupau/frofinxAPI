@@ -846,11 +846,8 @@ export const importTransactions = async (
       status: 'completed'
     })));
 
-    // Update wallet balance with the net effect of all imported transactions
-    const incomeTotal  = valid.filter(r => r.type === 'income').reduce((s: number, r: any) => s + r.amount, 0);
-    const expenseTotal = valid.filter(r => r.type === 'expense').reduce((s: number, r: any) => s + r.amount, 0);
-    wallet.balance += incomeTotal - expenseTotal;
-    await wallet.save();
+    // Imported transactions no longer move the wallet balance — see
+    // wallets.service.ts#setBalance for manual reconciliation after import.
 
     return {
       error: false,

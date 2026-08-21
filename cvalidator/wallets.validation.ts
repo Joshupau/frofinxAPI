@@ -29,6 +29,11 @@ export const adjustBalanceSchema = z.object({
   description: optionalString
 });
 
+export const setBalanceSchema = z.object({
+  id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid wallet ID'),
+  balance: z.number()
+});
+
 export const archiveWalletSchema = z.object({
   id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid wallet ID')
 });
